@@ -3,6 +3,7 @@ db.py — SQLite database layer for JobHunter
 """
 import sqlite3
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -20,8 +21,16 @@ def get_conn() -> sqlite3.Connection:
 
 
 def init_db():
+    """Initialize base schema and run migrations."""
     with get_conn() as conn:
+        # Base tables
         conn.executescript("""
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
         CREATE TABLE IF NOT EXISTS companies (
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
             -- Identity
@@ -47,7 +56,7 @@ def init_db():
             -- Tech profile (enriched)
             tech_stack       TEXT,                 -- comma-separated, from LinkedIn/jobs
             description      TEXT,                 -- company summary
-            -- Contact
+            -- Contact (Legacy, replaced by contacts table in 001_contacts.sql)
             contact_name     TEXT,
             contact_role     TEXT,
             contact_email    TEXT,
@@ -114,7 +123,56 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_type   ON jobs(type);
         CREATE INDEX IF NOT EXISTS idx_score  ON jobs(relevance_score DESC);
         """)
+        
+    run_migrations()
     print(f"✓ Database ready at {DB_PATH}")
+
+
+def run_migrations():
+    migrations_dir = Path(__file__).parent / "migrations"
+    if not migrations_dir.exists():
+        return
+
+    migration_files = sorted(migrations_dir.glob("*.sql"))
+    
+    with get_conn() as conn:
+        applied = {row["name"] for row in conn.execute("SELECT name FROM schema_migrations").fetchall()}
+        
+        for m_file in migration_files:
+            if m_file.name not in applied:
+                print(f"  Applying migration: {m_file.name}")
+                sql = m_file.read_text()
+                try:
+                    conn.executescript(sql)
+                    
+                    # Handle specific ALTER TABLE statements for 001_contacts.sql
+                    if m_file.name == "001_contacts.sql":
+                        try:
+                            conn.execute("ALTER TABLE companies ADD COLUMN primary_contact_id INTEGER REFERENCES contacts(id)")
+                        except sqlite3.OperationalError: pass # Already exists
+                        try:
+                            conn.execute("ALTER TABLE companies ADD COLUMN company_type TEXT DEFAULT 'UNKNOWN' CHECK(company_type IN ('TECH', 'TECH_ADJACENT', 'NON_TECH', 'UNKNOWN'))")
+                        except sqlite3.OperationalError: pass
+                        try:
+                            conn.execute("ALTER TABLE companies ADD COLUMN has_internal_tech_team INTEGER DEFAULT NULL")
+                        except sqlite3.OperationalError: pass
+                        try:
+                            conn.execute("ALTER TABLE companies ADD COLUMN tech_team_signals TEXT")
+                        except sqlite3.OperationalError: pass
+                        
+                        # Update primary_contact_id for existing ones
+                        conn.execute("""
+                            UPDATE companies SET primary_contact_id = (
+                                SELECT id FROM contacts WHERE company_id = companies.id LIMIT 1
+                            )
+                        """)
+
+                    conn.execute("INSERT INTO schema_migrations (name) VALUES (?)", (m_file.name,))
+                    conn.commit()
+                except Exception as e:
+                    conn.rollback()
+                    print(f"  ❌ Error applying migration {m_file.name}: {e}")
+                    raise
 
 
 def upsert_job(data: dict) -> tuple[int, bool]:
@@ -243,12 +301,13 @@ COMPANY_COLS = [
     "tech_stack", "description",
     "contact_name", "contact_role", "contact_email", "contact_linkedin",
     "careers_page_url", "source", "status", "relevance_score", "notes", "date_found",
+    "company_type", "has_internal_tech_team", "tech_team_signals", "primary_contact_id"
 ]
 
 
 def upsert_company(data: dict) -> tuple[int, bool]:
     """Insert or ignore by SIREN (or name if no SIREN). Returns (id, is_new)."""
-    row = {k: data.get(k) for k in COMPANY_COLS}
+    row = {k: data.get(k) for k in COMPANY_COLS if k in data}
     row["date_found"] = row.get("date_found") or datetime.today().strftime("%Y-%m-%d")
     row["status"] = row.get("status") or "NEW"
 
@@ -277,11 +336,13 @@ def upsert_company(data: dict) -> tuple[int, bool]:
 
 def update_company(company_id: int, fields: dict):
     fields["updated_at"] = datetime.now().isoformat()
-    set_clause = ", ".join(f"{k}=?" for k in fields)
+    # Filter only columns that exist
+    valid_fields = {k: v for k, v in fields.items() if k in COMPANY_COLS or k == "updated_at"}
+    set_clause = ", ".join(f"{k}=?" for k in valid_fields)
     with get_conn() as conn:
         conn.execute(
             f"UPDATE companies SET {set_clause} WHERE id=?",
-            [*fields.values(), company_id]
+            [*valid_fields.values(), company_id]
         )
 
 

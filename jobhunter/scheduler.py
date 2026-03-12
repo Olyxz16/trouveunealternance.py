@@ -43,8 +43,8 @@ def notify(title: str, message: str):
 # ── DIFF DETECTION ────────────────────────────────────────────────────────────
 
 def get_current_counts() -> dict:
-    """Snapshot current DB counts per status."""
-    from db import get_stats, init_db
+    \"\"\"Snapshot current DB counts per status.\"\"\"
+    from jobhunter.db import get_stats, init_db
     init_db()
     stats = get_stats()
     return {
@@ -85,7 +85,7 @@ def summarize_diff(before: dict, after: dict) -> str:
 
 async def run_pipeline_once(run_enrichment: bool = True):
     """Run Stage 1 (all sites) + optional Stage 2, return summary."""
-    from scraper import run_stage1, run_stage2
+    from jobhunter.scraper import run_stage1, run_stage2
 
     log_path = LOG_DIR / f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
     console.print(f"\n{'='*60}")
@@ -123,8 +123,8 @@ async def run_pipeline_once(run_enrichment: bool = True):
     return summary
 
 async def run_archive_job():
-    """Move old cache entries to disk."""
-    from db import get_conn
+    \"\"\"Move old cache entries to disk.\"\"\"
+    from jobhunter.db import get_conn
     import os
     
     console.print("[dim]Running cache archive job...[/dim]")

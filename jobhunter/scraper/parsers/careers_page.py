@@ -3,7 +3,7 @@ scraper/parsers/careers_page.py — Generic company page and LinkedIn extractor.
 """
 from typing import List, Optional, Literal
 from pydantic import BaseModel, Field
-from llm import client as llm_client
+from jobhunter.llm import client as llm_client
 
 class RawCompanyPage(BaseModel):
     name: str = Field(description="Company name")

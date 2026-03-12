@@ -13,8 +13,8 @@ from rich.console import Console
 from rich.table import Table
 from rich.progress import track
 
-from db import init_db, upsert_job, log_activity, get_stats
-from classifier import classify_listing
+from jobhunter.db import init_db, upsert_job, log_activity, get_stats
+from jobhunter.classifier import classify_listing
 
 console = Console()
 

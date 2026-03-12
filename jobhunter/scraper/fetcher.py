@@ -6,8 +6,8 @@ import asyncio
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 from typing import Literal, Optional
-from db import get_conn
-from errors import JinaError, MCPError, EmptyContentError
+from jobhunter.db import get_conn
+from jobhunter.errors import JinaError, MCPError, EmptyContentError
 
 @dataclass
 class FetchResult:

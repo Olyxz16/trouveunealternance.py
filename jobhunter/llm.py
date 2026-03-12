@@ -10,7 +10,7 @@ import httpx
 from typing import Optional, Any, Type, TypeVar
 from pydantic import BaseModel, ValidationError
 from dotenv import load_dotenv
-from errors import RateLimitError, ModelError, ParseError
+from jobhunter.errors import RateLimitError, ModelError, ParseError
 
 load_dotenv()
 
@@ -202,7 +202,7 @@ class LLMClient:
     async def _log_usage(self, run_id, step, model, prompt_tokens, completion_tokens, cost_usd):
         # This will be implemented when db.py is ready with the llm_usage table.
         # For now, we just print or use a placeholder.
-        from db import get_conn
+        from jobhunter.db import get_conn
         try:
             with get_conn() as conn:
                 conn.execute(

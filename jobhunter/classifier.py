@@ -4,7 +4,7 @@ classifier.py — LLM-powered relevance scoring and tech stack extraction
 import json
 from typing import Optional, List, Literal
 from pydantic import BaseModel, Field
-from llm import client as llm_client
+from jobhunter.llm import client as llm_client
 
 class JobClassification(BaseModel):
     type: Literal["DIRECT", "COMPANY_LEAD", "SKIP"]

@@ -6,8 +6,8 @@ import json
 import os
 from typing import Optional, List, Literal
 from pydantic import BaseModel, Field
-from llm import client as llm_client
-from db import get_conn, upsert_company, update_company, get_companies
+from jobhunter.llm import client as llm_client
+from jobhunter.db import get_conn, upsert_company, update_company, get_companies
 
 class CompanyScore(BaseModel):
     relevance_score: int = Field(ge=0, le=10)

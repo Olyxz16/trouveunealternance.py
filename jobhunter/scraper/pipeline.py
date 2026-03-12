@@ -7,8 +7,8 @@ import uuid
 import traceback
 from datetime import datetime
 from typing import Callable, Any, Optional, TypeVar, Generic
-from db import get_conn, log_activity
-from errors import JobHunterError, Ok, Err, Result
+from jobhunter.db import get_conn, log_activity
+from jobhunter.errors import JobHunterError, Ok, Err, Result
 
 T = TypeVar("T")
 

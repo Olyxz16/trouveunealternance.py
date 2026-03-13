@@ -44,7 +44,7 @@ def notify(title: str, message: str):
 
 def get_current_counts() -> dict:
     """Snapshot current DB counts per status."""
-    from db import get_stats, init_db
+    from jobhunter.db import get_stats, init_db
     init_db()
     stats = get_stats()
     return {
@@ -85,7 +85,7 @@ def summarize_diff(before: dict, after: dict) -> str:
 
 async def run_pipeline_once(run_enrichment: bool = True):
     """Run Stage 1 (all sites) + optional Stage 2, return summary."""
-    from scraper import run_stage1, run_stage2
+    from jobhunter.scraper import run_stage1, run_stage2
 
     log_path = LOG_DIR / f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
     console.print(f"\n{'='*60}")
@@ -116,7 +116,40 @@ async def run_pipeline_once(run_enrichment: bool = True):
     with open(log_path, "a") as f:
         f.write(f"\n[{datetime.now().isoformat()}] {summary}\n")
 
+    # Run archive job nightly
+    if datetime.now().hour >= 23 or datetime.now().hour <= 1:
+        await run_archive_job()
+
     return summary
+
+async def run_archive_job():
+    """Move old cache entries to disk."""
+    from jobhunter.db import get_conn
+    import os
+    
+    console.print("[dim]Running cache archive job...[/dim]")
+    cutoff = (datetime.now() - __import__('datetime').timedelta(days=30)).isoformat()
+    
+    archive_dir = Path(__file__).parent / "data" / "cache" / datetime.now().strftime("%Y-%m")
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    
+    with get_conn() as conn:
+        old_entries = conn.execute(
+            "SELECT * FROM scrape_cache WHERE fetched_at < ?", (cutoff,)
+        ).fetchall()
+        
+        for entry in old_entries:
+            url_hash = hash(entry["url"]) # Simplistic hash for filename
+            domain = entry["url"].split("//")[-1].split("/")[0]
+            domain_dir = archive_dir / domain
+            domain_dir.mkdir(exist_ok=True)
+            
+            path = domain_dir / f"{url_hash}.md"
+            path.write_text(entry["content_md"])
+            
+            conn.execute("DELETE FROM scrape_cache WHERE id = ?", (entry["id"],))
+            
+    console.print(f"[green]✓ Archived {len(old_entries)} old cache entries.[/green]")
 
 
 # ── SCHEDULER LOOP ────────────────────────────────────────────────────────────

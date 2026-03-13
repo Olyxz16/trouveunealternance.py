@@ -3,6 +3,7 @@ db.py — SQLite database layer for JobHunter
 """
 import sqlite3
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -20,8 +21,16 @@ def get_conn() -> sqlite3.Connection:
 
 
 def init_db():
+    """Initialize base schema and run migrations."""
     with get_conn() as conn:
+        # Base tables
         conn.executescript("""
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
         CREATE TABLE IF NOT EXISTS companies (
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
             -- Identity
@@ -47,7 +56,7 @@ def init_db():
             -- Tech profile (enriched)
             tech_stack       TEXT,                 -- comma-separated, from LinkedIn/jobs
             description      TEXT,                 -- company summary
-            -- Contact
+            -- Contact (Legacy, replaced by contacts table in 001_contacts.sql)
             contact_name     TEXT,
             contact_role     TEXT,
             contact_email    TEXT,
@@ -114,7 +123,56 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_type   ON jobs(type);
         CREATE INDEX IF NOT EXISTS idx_score  ON jobs(relevance_score DESC);
         """)
+        
+    run_migrations()
     print(f"✓ Database ready at {DB_PATH}")
+
+
+def run_migrations():
+    migrations_dir = Path(__file__).parent / "migrations"
+    if not migrations_dir.exists():
+        return
+
+    migration_files = sorted(migrations_dir.glob("*.sql"))
+    
+    with get_conn() as conn:
+        applied = {row["name"] for row in conn.execute("SELECT name FROM schema_migrations").fetchall()}
+        
+        for m_file in migration_files:
+            if m_file.name not in applied:
+                print(f"  Applying migration: {m_file.name}")
+                sql = m_file.read_text()
+                try:
+                    conn.executescript(sql)
+                    
+                    # Handle specific ALTER TABLE statements for 001_contacts.sql
+                    if m_file.name == "001_contacts.sql":
+                        try:
+                            conn.execute("ALTER TABLE companies ADD COLUMN primary_contact_id INTEGER REFERENCES contacts(id)")
+                        except sqlite3.OperationalError: pass # Already exists
+                        try:
+                            conn.execute("ALTER TABLE companies ADD COLUMN company_type TEXT DEFAULT 'UNKNOWN' CHECK(company_type IN ('TECH', 'TECH_ADJACENT', 'NON_TECH', 'UNKNOWN'))")
+                        except sqlite3.OperationalError: pass
+                        try:
+                            conn.execute("ALTER TABLE companies ADD COLUMN has_internal_tech_team INTEGER DEFAULT NULL")
+                        except sqlite3.OperationalError: pass
+                        try:
+                            conn.execute("ALTER TABLE companies ADD COLUMN tech_team_signals TEXT")
+                        except sqlite3.OperationalError: pass
+                        
+                        # Update primary_contact_id for existing ones
+                        conn.execute("""
+                            UPDATE companies SET primary_contact_id = (
+                                SELECT id FROM contacts WHERE company_id = companies.id LIMIT 1
+                            )
+                        """)
+
+                    conn.execute("INSERT INTO schema_migrations (name) VALUES (?)", (m_file.name,))
+                    conn.commit()
+                except Exception as e:
+                    conn.rollback()
+                    print(f"  ❌ Error applying migration {m_file.name}: {e}")
+                    raise
 
 
 def upsert_job(data: dict) -> tuple[int, bool]:
@@ -243,12 +301,13 @@ COMPANY_COLS = [
     "tech_stack", "description",
     "contact_name", "contact_role", "contact_email", "contact_linkedin",
     "careers_page_url", "source", "status", "relevance_score", "notes", "date_found",
+    "company_type", "has_internal_tech_team", "tech_team_signals", "primary_contact_id"
 ]
 
 
 def upsert_company(data: dict) -> tuple[int, bool]:
     """Insert or ignore by SIREN (or name if no SIREN). Returns (id, is_new)."""
-    row = {k: data.get(k) for k in COMPANY_COLS}
+    row = {k: data.get(k) for k in COMPANY_COLS if k in data}
     row["date_found"] = row.get("date_found") or datetime.today().strftime("%Y-%m-%d")
     row["status"] = row.get("status") or "NEW"
 
@@ -277,11 +336,13 @@ def upsert_company(data: dict) -> tuple[int, bool]:
 
 def update_company(company_id: int, fields: dict):
     fields["updated_at"] = datetime.now().isoformat()
-    set_clause = ", ".join(f"{k}=?" for k in fields)
+    # Filter only columns that exist
+    valid_fields = {k: v for k, v in fields.items() if k in COMPANY_COLS or k == "updated_at"}
+    set_clause = ", ".join(f"{k}=?" for k in valid_fields)
     with get_conn() as conn:
         conn.execute(
             f"UPDATE companies SET {set_clause} WHERE id=?",
-            [*fields.values(), company_id]
+            [*valid_fields.values(), company_id]
         )
 
 
@@ -324,6 +385,116 @@ def get_prospect_cities() -> list[dict]:
             GROUP BY city ORDER BY count DESC LIMIT 20
         """).fetchall()
         return [dict(r) for r in rows]
+
+# ── RUNS & USAGE (V1) ────────────────────────────────────────────────────────
+
+def get_runs(limit: int = 50) -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute("""
+            SELECT run_id, 
+                   MIN(ts) as start_time, 
+                   MAX(ts) as last_activity,
+                   COUNT(CASE WHEN status='ok' THEN 1 END) as ok_count,
+                   COUNT(CASE WHEN status='error' THEN 1 END) as error_count,
+                   COUNT(CASE WHEN status='needs_review' THEN 1 END) as review_count,
+                   COUNT(DISTINCT company_id) as companies_processed
+            FROM run_log
+            GROUP BY run_id
+            ORDER BY start_time DESC
+            LIMIT ?
+        """, (limit,)).fetchall()
+        return [dict(r) for r in rows]
+
+def get_run_detail(run_id: str) -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute("""
+            SELECT l.*, c.name as company_name, j.title as job_title
+            FROM run_log l
+            LEFT JOIN companies c ON l.company_id = c.id
+            LEFT JOIN jobs j ON l.job_id = j.id
+            WHERE l.run_id = ?
+            ORDER BY l.ts ASC
+        """, (run_id,)).fetchall()
+        return [dict(r) for r in rows]
+
+def get_usage_today() -> dict:
+    with get_conn() as conn:
+        row = conn.execute("""
+            SELECT COUNT(*) as requests,
+                   SUM(prompt_tokens) as prompt_tokens,
+                   SUM(completion_tokens) as completion_tokens,
+                   SUM(cost_usd) as total_cost
+            FROM llm_usage
+            WHERE date(ts) = date('now')
+        """).fetchone()
+        return dict(row) if row else {"requests": 0, "prompt_tokens": 0, "completion_tokens": 0, "total_cost": 0}
+
+def get_usage_history(days: int = 30) -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute("""
+            SELECT date(ts) as day,
+                   COUNT(*) as requests,
+                   SUM(prompt_tokens) as prompt_tokens,
+                   SUM(completion_tokens) as completion_tokens,
+                   SUM(cost_usd) as cost
+            FROM llm_usage
+            GROUP BY day
+            ORDER BY day DESC
+            LIMIT ?
+        """, (days,)).fetchall()
+        return [dict(r) for r in rows]
+
+def get_contacts(company_id: int) -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute("""
+            SELECT * FROM contacts WHERE company_id = ? ORDER BY created_at DESC
+        """, (company_id,)).fetchall()
+        return [dict(r) for r in rows]
+
+def add_contact(company_id: int, data: dict) -> int:
+    """Add a new contact and optionally set as primary."""
+    cols = ["company_id", "name", "role", "email", "linkedin_url", "source", "confidence", "status", "notes"]
+    row = {k: data.get(k) for k in cols if k in data}
+    row["company_id"] = company_id
+    
+    with get_conn() as conn:
+        placeholders = ", ".join(["?" for _ in row])
+        cur = conn.execute(f"""
+            INSERT INTO contacts ({ ", ".join(row.keys()) })
+            VALUES ({placeholders})
+        """, list(row.values()))
+        contact_id = cur.lastrowid
+        
+        # If this is the first contact or marked as primary, update company
+        if data.get("is_primary"):
+            conn.execute("UPDATE companies SET primary_contact_id = ? WHERE id = ?", (contact_id, company_id))
+        
+        return contact_id
+
+def get_scraping_health() -> dict:
+    with get_conn() as conn:
+        jina_stats = conn.execute("""
+            SELECT COUNT(*) as total,
+                   COUNT(CASE WHEN quality > 0.5 THEN 1 END) as healthy
+            FROM scrape_cache
+            WHERE method = 'jina' AND fetched_at > datetime('now', '-24 hours')
+        """).fetchone()
+        
+        mcp_count = conn.execute("""
+            SELECT COUNT(*) FROM scrape_cache 
+            WHERE method = 'mcp' AND fetched_at > datetime('now', '-24 hours')
+        """).fetchone()[0]
+        
+        needs_review = conn.execute("""
+            SELECT COUNT(*) FROM run_log WHERE status = 'needs_review'
+        """).fetchone()[0]
+        
+        return {
+            "jina_total": jina_stats["total"],
+            "jina_healthy": jina_stats["healthy"],
+            "mcp_24h": mcp_count,
+            "needs_review_count": needs_review
+        }
 
 
 if __name__ == "__main__":

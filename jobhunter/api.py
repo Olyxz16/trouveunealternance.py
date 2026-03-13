@@ -13,9 +13,10 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, StreamingResponse, FileResponse
 from pydantic import BaseModel
 
-from db import (
+from jobhunter.db import (
     init_db, get_jobs, get_job, update_job, get_stats, get_recent_activity, log_activity,
     get_companies, get_company, update_company, upsert_company, get_prospect_cities,
+    get_runs, get_run_detail, get_usage_today, get_usage_history, get_contacts, get_scraping_health
 )
 
 app = FastAPI(title="JobHunter API")
@@ -91,7 +92,7 @@ def activity(limit: int = 30):
 
 @app.post("/api/jobs/{job_id}/draft")
 async def generate_draft(job_id: int):
-    from emailer import draft_email
+    from jobhunter.emailer import draft_email
     job = get_job(job_id)
     if not job:
         raise HTTPException(404, "Job not found")
@@ -107,7 +108,7 @@ async def generate_draft(job_id: int):
 
 @app.post("/api/jobs/{job_id}/send")
 async def send_email_endpoint(job_id: int, draft: dict):
-    from emailer import send_email
+    from jobhunter.emailer import send_email
     job = get_job(job_id)
     if not job:
         raise HTTPException(404, "Job not found")
@@ -138,7 +139,7 @@ async def trigger_stage2():
 
 
 async def _run_stage1_bg():
-    from scraper import run_stage1
+    from jobhunter.scraper import run_stage1
     await _notify_sse({"type": "pipeline", "stage": "1", "status": "started"})
     try:
         await run_stage1()
@@ -148,7 +149,7 @@ async def _run_stage1_bg():
 
 
 async def _run_stage2_bg():
-    from scraper import run_stage2
+    from jobhunter.scraper import run_stage2
     await _notify_sse({"type": "pipeline", "stage": "2", "status": "started"})
     try:
         await run_stage2()
@@ -213,7 +214,7 @@ def patch_prospect(company_id: int, body: CompanyUpdate):
 @app.post("/api/prospects/{company_id}/draft")
 async def draft_prospect_email(company_id: int):
     """Draft a cold email for a prospect company (no job listing needed)."""
-    from emailer import draft_prospect_email as _draft
+    from jobhunter.emailer import draft_prospect_email as _draft
     c = get_company(company_id)
     if not c:
         raise HTTPException(404, "Company not found")
@@ -226,7 +227,7 @@ async def draft_prospect_email(company_id: int):
 
 @app.post("/api/prospects/{company_id}/send")
 async def send_prospect_email(company_id: int, draft: dict):
-    from emailer import send_email
+    from jobhunter.emailer import send_email
     c = get_company(company_id)
     if not c:
         raise HTTPException(404, "Company not found")
@@ -253,7 +254,7 @@ async def trigger_enrich_prospects():
 
 
 async def _run_scan_bg(city: str, departments: list[str]):
-    from prospector import cmd_scan
+    from jobhunter.prospector import cmd_scan
     await _notify_sse({"type": "pipeline", "stage": "scan", "status": "started"})
     try:
         await cmd_scan(city, departments, min_headcount=5)
@@ -263,7 +264,7 @@ async def _run_scan_bg(city: str, departments: list[str]):
 
 
 async def _run_prospect_enrich_bg():
-    from prospector import cmd_enrich
+    from jobhunter.prospector import cmd_enrich
     await _notify_sse({"type": "pipeline", "stage": "enrich_prospects", "status": "started"})
     try:
         await cmd_enrich()
@@ -286,6 +287,38 @@ def export_prospects_tsv():
         media_type="text/tab-separated-values",
         headers={"Content-Disposition": "attachment; filename=prospects.tsv"}
     )
+
+
+# ── V1 RUNS & USAGE ──────────────────────────────────────────────────────────
+
+@app.get("/api/runs")
+def list_runs(limit: int = 50):
+    return get_runs(limit)
+
+
+@app.get("/api/runs/{run_id}")
+def get_run(run_id: str):
+    return get_run_detail(run_id)
+
+
+@app.get("/api/usage/today")
+def usage_today():
+    return get_usage_today()
+
+
+@app.get("/api/usage/history")
+def usage_history(days: int = 30):
+    return get_usage_history(days)
+
+
+@app.get("/api/health")
+def scraping_health():
+    return get_scraping_health()
+
+
+@app.get("/api/prospects/{company_id}/contacts")
+def list_contacts(company_id: int):
+    return get_contacts(company_id)
 
 
 # ── SSE ───────────────────────────────────────────────────────────────────────

@@ -6,8 +6,8 @@
 - [x] 3b. `internal/llm/gemini_cli.go`: `GeminiCLIProvider`
 - [x] 4. `internal/tui/common.go`: Lip Gloss palette + `LogMsg` channel bridge
 - [x] 5. `internal/tui/stats_view.go`: Lip Gloss stats table
-- [ ] 6. `internal/collector/sirene.go`: DuckDB shell-out + NAF/headcount filter + import to `companies`
-- [ ] 7. `internal/enricher/classifier.go`: LLM scoring + TECH / TECH_ADJACENT / NON_TECH cap
+- [x] 6. `internal/collector/sirene.go`: DuckDB shell-out + NAF/headcount filter + import to `companies`
+- [x] 7. `internal/enricher/classifier.go`: LLM scoring + TECH / TECH_ADJACENT / NON_TECH cap
 - [ ] 8. `internal/pipeline/engine.go`: Run + Step executor + run_log writes
 - [ ] 9. `internal/scraper/jina.go`: Jina fetch + quality check
 - [ ] 10. `internal/scraper/mcp.go`: Blueprint MCP client

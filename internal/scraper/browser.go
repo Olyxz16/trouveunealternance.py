@@ -68,11 +68,14 @@ func NewBrowserFetcher(cookiesPath, display string, headless bool, binaryPath st
 	allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)
 	ctx, cancel := chromedp.NewContext(allocCtx)
 
-	// Warm up — start the browser process now, not on first fetch
-	if err := chromedp.Run(ctx); err != nil {
+	// Warm up with timeout — start the browser process now
+	warmupCtx, warmupCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer warmupCancel()
+
+	if err := chromedp.Run(warmupCtx); err != nil {
 		cancel()
 		allocCancel()
-		return nil, fmt.Errorf("failed to start browser: %w", err)
+		return nil, fmt.Errorf("failed to start browser (check if Chrome/Chromium is installed): %w", err)
 	}
 
 	bf := &BrowserFetcher{

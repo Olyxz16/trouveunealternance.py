@@ -9,6 +9,7 @@ import (
 	"jobhunter/internal/scraper"
 	"jobhunter/internal/tui"
 	"log"
+	"os"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 var batchSize int
@@ -33,59 +35,24 @@ var enrichCmd = &cobra.Command{
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		// Channel for TUI logs
-		logCh := make(chan tui.LogMsg, 100)
-		
-		// Setup LLM
-		var primary, fallback llm.Provider
-		if cfg.LLMPrimary == "openrouter" {
-			primary = llm.NewOpenRouterProvider(cfg.OpenRouterAPIKey, cfg.OpenRouterModel)
-		} else {
-			primary = llm.NewGeminiCLIProvider(cfg.GeminiCLIPath)
-		}
-
-		if cfg.LLMFallback == "gemini_cli" {
-			fallback = llm.NewGeminiCLIProvider(cfg.GeminiCLIPath)
-		} else if cfg.LLMFallback == "openrouter" {
-			fallback = llm.NewOpenRouterProvider(cfg.OpenRouterAPIKey, cfg.OpenRouterModel)
-		}
-
-		llmClient := llm.NewClient(primary, fallback, cfg.OpenRouterRPM, database)
-		classifier := enricher.NewClassifier(llmClient, database)
-
-		// Setup Scraper
-		httpFetcher := scraper.NewHTTPFetcher()
-		
-		logger, _ := zap.NewDevelopment()
-		defer logger.Sync()
-
-		browserFetcher, err := scraper.NewBrowserFetcher(
-			cfg.BrowserCookiesPath,
-			cfg.BrowserDisplay,
-			cfg.BrowserHeadless,
-			cfg.BrowserBinaryPath,
-			logger,
-		)
+		// 1. Redirect logs to file immediately to keep terminal clean
+		logFile, err := os.OpenFile("jobhunter.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 		if err != nil {
-			log.Fatalf("Failed to start browser: %v", err)
+			fmt.Fprintf(os.Stderr, "Error: Failed to open log file: %v\n", err)
+			os.Exit(1)
 		}
-		defer browserFetcher.Close()
+		defer logFile.Close()
+		log.SetOutput(logFile)
 
-		forceDomains := strings.Split(cfg.ForceBrowserDomains, ",")
-		extractor := scraper.NewExtractor()
-		
-		cascade := scraper.NewCascadeFetcher(httpFetcher, browserFetcher, forceDomains, database, extractor, logger)
-		
-		enr := enricher.NewEnricher(database, cascade, classifier)
-
-		// Get companies to enrich: status = 'NEW' AND relevance_score > 0
+		// 2. Pre-flight: Get companies
 		companies, err := database.GetCompaniesForEnrichment()
 		if err != nil {
-			log.Fatalf("Failed to get companies: %v", err)
+			log.Printf("Error: Failed to query database: %v", err)
+			fmt.Fprintf(os.Stderr, "Error: Failed to query database: %v\n", err)
+			os.Exit(1)
 		}
 
 		var targetCompanies []db.Company
-
 		for _, c := range companies {
 			if c.Status == "NEW" && c.RelevanceScore > 0 {
 				targetCompanies = append(targetCompanies, c)
@@ -101,13 +68,71 @@ var enrichCmd = &cobra.Command{
 			return
 		}
 
-		// Initialize TUI
-		m := tui.NewPipelineModel(runID, logCh)
-		m.Total = len(targetCompanies)
-		p := tea.NewProgram(m)
+		// 3. Setup zap logger for the components
+		encoderConfig := zap.NewDevelopmentEncoderConfig()
+		core := zapcore.NewCore(
+			zapcore.NewConsoleEncoder(encoderConfig),
+			zapcore.AddSync(logFile),
+			zap.InfoLevel,
+		)
+		logger := zap.New(core)
+		defer logger.Sync()
 
-		// Run enrichment in background
+		// 4. Setup TUI and background worker
+		logCh := make(chan tui.LogMsg, 100)
+		m := tui.NewPipelineModel(runID, logCh)
+		p := tea.NewProgram(m, tea.WithAltScreen())
+
 		go func() {
+			// Small delay to ensure TUI has started and received WindowSizeMsg
+			time.Sleep(100 * time.Millisecond)
+			p.Send(tui.TotalUpdateMsg(len(targetCompanies)))
+			logCh <- tui.LogMsg{Level: "INFO", Text: "Initializing enrichment pipeline..."}
+
+			// Setup LLM
+			logCh <- tui.LogMsg{Level: "INFO", Text: "Connecting to LLM providers..."}
+			var primary, fallback llm.Provider
+			if cfg.LLMPrimary == "openrouter" {
+				primary = llm.NewOpenRouterProvider(cfg.OpenRouterAPIKey, cfg.OpenRouterModel)
+			} else {
+				primary = llm.NewGeminiCLIProvider(cfg.GeminiCLIPath)
+			}
+
+			if cfg.LLMFallback == "gemini_cli" {
+				fallback = llm.NewGeminiCLIProvider(cfg.GeminiCLIPath)
+			} else if cfg.LLMFallback == "openrouter" {
+				fallback = llm.NewOpenRouterProvider(cfg.OpenRouterAPIKey, cfg.OpenRouterModel)
+			}
+
+			llmClient := llm.NewClient(primary, fallback, cfg.OpenRouterRPM, database)
+			classifier := enricher.NewClassifier(llmClient, database)
+
+			// Setup Scraper
+			logCh <- tui.LogMsg{Level: "INFO", Text: "Launching browser instance..."}
+			httpFetcher := scraper.NewHTTPFetcher()
+			browserFetcher, err := scraper.NewBrowserFetcher(
+				cfg.BrowserCookiesPath,
+				cfg.BrowserDisplay,
+				cfg.BrowserHeadless,
+				cfg.BrowserBinaryPath,
+				logger,
+			)
+			if err != nil {
+				logCh <- tui.LogMsg{Level: "WARN", Text: fmt.Sprintf("Browser failed: %v. Using HTTP only.", err)}
+			} else {
+				defer browserFetcher.Close()
+				logCh <- tui.LogMsg{Level: "INFO", Text: "Browser ready."}
+			}
+
+			forceDomains := strings.Split(cfg.ForceBrowserDomains, ",")
+			extractor := scraper.NewExtractor()
+			cascade := scraper.NewCascadeFetcher(httpFetcher, browserFetcher, forceDomains, database, extractor, logger)
+			enr := enricher.NewEnricher(database, cascade, classifier)
+
+			p.Send(tui.ReadyMsg{})
+			logCh <- tui.LogMsg{Level: "INFO", Text: fmt.Sprintf("Enriching %d companies...", len(targetCompanies))}
+
+			// Start Processing
 			for _, c := range targetCompanies {
 				p.Send(tui.CompanyUpdateMsg{
 					ID:     c.ID,
@@ -137,13 +162,14 @@ var enrichCmd = &cobra.Command{
 					logCh <- tui.LogMsg{Level: "INFO", Text: fmt.Sprintf("Successfully enriched %s", c.Name)}
 				}
 				
-				// Small delay to avoid aggressive scraping
 				time.Sleep(1 * time.Second)
 			}
 			p.Send(tui.PipelineDoneMsg{})
 		}()
 
+		// Start TUI (blocks until exit)
 		if _, err := p.Run(); err != nil {
+			log.SetOutput(os.Stderr) // restore for final error
 			log.Fatalf("TUI Error: %v", err)
 		}
 	},

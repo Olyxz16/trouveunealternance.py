@@ -49,14 +49,26 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID int, runID string) 
 		}
 	}
 
+	// Stage 0b. Fetch website from Recherche API if missing
+	website := comp.Website.String
+	if website == "" && comp.Siren.Valid {
+		info, err := e.recherche.GetCompanyInfo(ctx, comp.Siren.String)
+		if err == nil && info.Website != "" {
+			website = info.Website
+			_ = e.db.UpdateCompany(comp.ID, map[string]interface{}{
+				"website": website,
+			})
+			log.Printf("Recherche API: found website %s for %s", website, comp.Name)
+		}
+	}
+
 	fmt.Printf("▶ Enriching %s...\n", comp.Name)
 
 	// 1. Discover URLs if missing
-	website := comp.Website.String
 	linkedin := comp.LinkedinURL.String
 	if website == "" || linkedin == "" {
-		disc := NewURLDiscoverer(e.fetcher)
-		w, l, err := disc.DiscoverURLs(ctx, *comp)
+		disc := NewURLDiscoverer(e.fetcher, e.classifier)
+		w, l, err := disc.DiscoverURLs(ctx, *comp, runID)
 		if err == nil {
 			if website == "" {
 				website = w
@@ -77,12 +89,36 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID int, runID string) 
 		targetURL = website
 	}
 	if targetURL == "" {
-		return fmt.Errorf("no URL found for company %s", comp.Name)
+		_ = e.db.UpdateCompany(comp.ID, map[string]interface{}{
+			"status": "NO_CONTACT_FOUND",
+		})
+		return nil
 	}
 
 	res, err := e.fetcher.Fetch(ctx, targetURL)
-	if err != nil {
-		return fmt.Errorf("fetch failed for %s: %w", targetURL, err)
+	if err == nil {
+		log.Printf("Fetched %s: quality %.2f via %s", targetURL, res.Quality, res.Method)
+	}
+
+	if err != nil || res.Quality < 0.3 {
+		// Guessed LinkedIn slug may be wrong — try website as fallback
+		if website != "" && targetURL != website {
+			log.Printf("Low quality fetch for %s (%.2f), retrying with website %s",
+				targetURL, res.Quality, website)
+			res, err = e.fetcher.Fetch(ctx, website)
+		}
+		if err != nil || res.Quality < 0.3 {
+			// Clear the bad LinkedIn URL so it is not persisted
+			if strings.Contains(targetURL, "linkedin.com") && linkedin != comp.LinkedinURL.String {
+				_ = e.db.UpdateCompany(comp.ID, map[string]interface{}{
+					"linkedin_url": "",
+				})
+			}
+			_ = e.db.UpdateCompany(comp.ID, map[string]interface{}{
+				"status": "NO_CONTACT_FOUND",
+			})
+			return nil
+		}
 	}
 
 	// 3. Extract company-level info
@@ -120,9 +156,12 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID int, runID string) 
 
 	people, err := e.classifier.ExtractPeopleFromPage(ctx, peopleRes.ContentMD, runID)
 	if err != nil || len(people.Contacts) == 0 {
+		log.Printf("No contacts found on LinkedIn for %s (err: %v)", comp.Name, err)
 		_ = e.db.UpdateCompany(comp.ID, map[string]interface{}{"status": "NO_CONTACT_FOUND"})
 		return nil
 	}
+
+	log.Printf("Found %d candidates for %s", len(people.Contacts), comp.Name)
 
 	// 5. Enrich top candidates from their individual /in/ profiles (max 3)
 	maxProfiles := 3
@@ -144,6 +183,11 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID int, runID string) 
 
 	// 6. Rank to find best contact
 	best, _ := e.classifier.RankContacts(ctx, enriched, info.CompanyType, runID)
+	if best == nil {
+		log.Printf("No suitable contact found after ranking for %s", comp.Name)
+	} else {
+		log.Printf("Best contact for %s: %s (%s)", comp.Name, best.Name, best.Role)
+	}
 
 	// 7. Save ALL contacts, mark best as primary
 	var primaryContactID int

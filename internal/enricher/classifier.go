@@ -56,6 +56,31 @@ func NewClassifier(llmClient *llm.Client, database *db.DB) *Classifier {
 	}
 }
 
+const SearchDiscoveryPrompt = `You are extracting the official company website and LinkedIn company page from search engine results.
+
+Return a JSON object with:
+- website: the official company website (e.g., https://www.enedis.fr)
+- linkedin_url: the official LinkedIn company page (e.g., https://www.linkedin.com/company/enedis)
+
+STRICT RULES:
+- Only return the official links.
+- Skip directory sites like Pappers, Societe.com, Verif, etc.
+- If not found, return empty strings.
+`
+
+func (c *Classifier) ExtractURLsFromSearch(ctx context.Context, searchResultMD string, runID string) (string, string, error) {
+	type searchResult struct {
+		Website     string `json:"website"`
+		LinkedinURL string `json:"linkedin_url"`
+	}
+	var res searchResult
+	req := llm.CompletionRequest{
+		System: SearchDiscoveryPrompt,
+		User:   fmt.Sprintf("Search results (Markdown):\n\n%s", searchResultMD),
+	}
+	err := c.llm.CompleteJSON(ctx, req, "extract_urls_from_search", runID, &res)
+	return res.Website, res.LinkedinURL, err
+}
 func (c *Classifier) ScoreCompany(ctx context.Context, comp db.Company, runID string) (CompanyScore, error) {
 	currentInfo := ""
 	if comp.CompanyType != "" && comp.CompanyType != "UNKNOWN" {

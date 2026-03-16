@@ -10,6 +10,7 @@ import (
 	"jobhunter/internal/pipeline"
 	"jobhunter/internal/tui"
 	"log"
+	"os"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -35,15 +36,25 @@ var scanCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		runID := uuid.New().String()
 		
-		// Channel for TUI logs
+		// 1. Redirect logs to file
+		logFile, err := os.OpenFile("jobhunter.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: Failed to open log file: %v\n", err)
+			os.Exit(1)
+		}
+		defer logFile.Close()
+		log.SetOutput(logFile)
+
+		// 2. Setup TUI
 		logCh := make(chan tui.LogMsg, 100)
 		m := tui.NewPipelineModel(runID, logCh)
-		p := tea.NewProgram(m)
+		p := tea.NewProgram(m, tea.WithAltScreen())
 
 		engine := pipeline.NewEngine(database)
 		sirene := collector.NewSireneCollector(database, cfg.SireneParquetPath, cfg.SireneULParquetPath)
 		
 		go func() {
+			time.Sleep(100 * time.Millisecond)
 			steps := []pipeline.Step{
 				{
 					Name:    "scan_sirene",
@@ -75,6 +86,7 @@ var scanCmd = &cobra.Command{
 		}()
 
 		if _, err := p.Run(); err != nil {
+			log.SetOutput(os.Stderr)
 			log.Fatalf("TUI Error: %v", err)
 		}
 	},
@@ -85,11 +97,23 @@ var scoreCmd = &cobra.Command{
 	Short: "Score unscored companies in DB",
 	Run: func(cmd *cobra.Command, args []string) {
 		runID := uuid.New().String()
+		
+		// 1. Redirect logs to file
+		logFile, err := os.OpenFile("jobhunter.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: Failed to open log file: %v\n", err)
+			os.Exit(1)
+		}
+		defer logFile.Close()
+		log.SetOutput(logFile)
+
+		// 2. Setup TUI
 		logCh := make(chan tui.LogMsg, 100)
 		m := tui.NewPipelineModel(runID, logCh)
-		p := tea.NewProgram(m)
+		p := tea.NewProgram(m, tea.WithAltScreen())
 
 		go func() {
+			time.Sleep(100 * time.Millisecond)
 			err := scoreUnscoredWithTUI(context.Background(), runID, p, logCh)
 			if err != nil {
 				logCh <- tui.LogMsg{Level: "ERROR", Text: fmt.Sprintf("Scoring failed: %v", err)}
@@ -98,6 +122,7 @@ var scoreCmd = &cobra.Command{
 		}()
 
 		if _, err := p.Run(); err != nil {
+			log.SetOutput(os.Stderr)
 			log.Fatalf("TUI Error: %v", err)
 		}
 	},
@@ -122,10 +147,8 @@ func scoreUnscoredWithTUI(ctx context.Context, runID string, p *tea.Program, log
 	}
 
 	logCh <- tui.LogMsg{Level: "INFO", Text: fmt.Sprintf("Scoring %d companies...", len(unscored))}
+	p.Send(tui.TotalUpdateMsg(len(unscored)))
 	
-	// We can't easily update the 'Total' in the model from here without some changes
-	// but we can send updates for each company.
-
 	// Setup LLM
 	var primary, fallback llm.Provider
 	if cfg.LLMPrimary == "openrouter" {

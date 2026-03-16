@@ -54,8 +54,11 @@ func (c *CascadeFetcher) Fetch(ctx context.Context, url string) (FetchResult, er
 	}
 
 	if useBrowser {
-		c.logger.Info("forcing browser for domain", zap.String("url", url))
-		return c.tryFetcher(ctx, c.fallback, url)
+		if c.fallback != nil {
+			c.logger.Info("forcing browser for domain", zap.String("url", url))
+			return c.tryFetcher(ctx, c.fallback, url)
+		}
+		c.logger.Warn("browser required but fetcher not available, trying primary", zap.String("url", url))
 	}
 
 	// 3. Try primary
@@ -71,7 +74,10 @@ func (c *CascadeFetcher) Fetch(ctx context.Context, url string) (FetchResult, er
 	}
 
 	// 4. Try fallback
-	return c.tryFetcher(ctx, c.fallback, url)
+	if c.fallback != nil {
+		return c.tryFetcher(ctx, c.fallback, url)
+	}
+	return res, err
 }
 
 func (c *CascadeFetcher) tryFetcher(ctx context.Context, f Fetcher, url string) (FetchResult, error) {
@@ -105,7 +111,7 @@ func (c *CascadeFetcher) tryFetcher(ctx context.Context, f Fetcher, url string) 
 			expiresAt = now.Add(7 * 24 * time.Hour)
 		}
 
-		_ = c.cache.SetCache(&db.ScrapeCache{
+		err = c.cache.SetCache(&db.ScrapeCache{
 			URL:       url,
 			Method:    f.Name(),
 			ContentMD: markdown,
@@ -113,6 +119,9 @@ func (c *CascadeFetcher) tryFetcher(ctx context.Context, f Fetcher, url string) 
 			FetchedAt: now.Format("2006-01-02 15:04:05"),
 			ExpiresAt: expiresAt.Format("2006-01-02 15:04:05"),
 		})
+		if err != nil {
+			c.logger.Error("failed to write to cache", zap.Error(err), zap.String("url", url))
+		}
 	}
 
 	return res, nil

@@ -61,7 +61,9 @@ func NewPipelineModel(runID string, logChan <-chan LogMsg) *PipelineModel {
 		LogChan:   logChan,
 		spinner:   s,
 		progress:  progress.New(progress.WithDefaultGradient()),
-		viewport:  viewport.New(0, 0),
+		viewport:  viewport.New(80, 10),
+		width:     80,
+		height:    24,
 	}
 }
 
@@ -125,6 +127,13 @@ func (m PipelineModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case TotalUpdateMsg:
+		m.Total = int(msg)
+		return m, nil
+
+	case ReadyMsg:
+		return m, nil
+
 	case PipelineDoneMsg:
 		m.Done = true
 		return m, nil
@@ -143,8 +152,8 @@ func (m PipelineModel) View() string {
 
 	// Header
 	elapsed := time.Since(m.StartTime).Round(time.Second)
-	s.WriteString(TitleStyle.Render(fmt.Sprintf("JobHunter Pipeline | Run: %s | %s", m.RunID, elapsed)))
-	s.WriteString("\n\n")
+	header := TitleStyle.Render(fmt.Sprintf("JobHunter Pipeline | Run: %s | %s", m.RunID, elapsed))
+	s.WriteString(header + "\n\n")
 
 	// Progress
 	if m.Total > 0 {
@@ -153,9 +162,18 @@ func (m PipelineModel) View() string {
 		s.WriteString("\n\n")
 	}
 
-	// Companies
-	s.WriteString("Companies:\n")
-	for i := len(m.Companies) - 1; i >= 0 && i > len(m.Companies)-10; i-- {
+	// Recent Activity
+	s.WriteString(Bold.Render("Recent Activity:") + "\n")
+	
+	// Calculate available space for company rows
+	// Header(2) + Progress(3) + Labels(1) + Stats(2) + LogsLabel(1) + Viewport(10) + Footer(2) = ~21 lines
+	maxRows := m.height - 22
+	if maxRows < 1 {
+		maxRows = 1
+	}
+	
+	count := 0
+	for i := len(m.Companies) - 1; i >= 0 && count < maxRows; i-- {
 		c := m.Companies[i]
 		icon := m.spinner.View()
 		if c.Status == StatusDone {
@@ -164,19 +182,30 @@ func (m PipelineModel) View() string {
 			icon = lipgloss.NewStyle().Foreground(Danger).Render("✗")
 		}
 		
-		s.WriteString(fmt.Sprintf(" %s %-20s | %-15s | %s\n", icon, truncate(c.Name, 20), c.Step, DimStyle.Render(c.Message)))
+		name := truncate(c.Name, 20)
+		row := fmt.Sprintf(" %s %-20s | %-15s | %s", icon, name, c.Step, DimStyle.Render(c.Message))
+		s.WriteString(lipgloss.NewStyle().MaxWidth(m.width).Render(row) + "\n")
+		count++
 	}
 	
-	// Pad middle space
-	s.WriteString(strings.Repeat("\n", max(0, m.height-20-len(m.Companies))))
+	// Pad middle space to keep footer at bottom
+	currentHeight := lipgloss.Height(s.String())
+	targetStatsPos := m.height - 15 // Leave space for stats and logs
+	if targetStatsPos > currentHeight {
+		s.WriteString(strings.Repeat("\n", targetStatsPos-currentHeight))
+	}
 
 	// Stats
-	footer := fmt.Sprintf(" Total: %d | Done: %d | Success: %d | Failed: %d", m.Total, m.Processed, m.Success, m.Failed)
-	s.WriteString(lipgloss.NewStyle().Background(Dim).Foreground(Surface).Width(m.width).Render(footer))
-	s.WriteString("\n\n")
+	footerContent := fmt.Sprintf(" Total: %d | Done: %d | Success: %d | Failed: %d ", m.Total, m.Processed, m.Success, m.Failed)
+	footer := lipgloss.NewStyle().
+		Background(Dim).
+		Foreground(Surface).
+		Width(m.width).
+		Render(footerContent)
+	s.WriteString(footer + "\n\n")
 
 	// Logs
-	s.WriteString("Logs:\n")
+	s.WriteString(Bold.Render("Logs:") + "\n")
 	s.WriteString(m.viewport.View())
 
 	if m.Done {
@@ -195,6 +224,8 @@ type CompanyUpdateMsg struct {
 	Message string
 }
 
+type TotalUpdateMsg int
+type ReadyMsg struct{}
 type PipelineDoneMsg struct{}
 
 func truncate(s string, max int) string {

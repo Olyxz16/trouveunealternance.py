@@ -15,6 +15,7 @@ type CompanyPageData struct {
 	Headcount           string   `json:"headcount"`
 	TechStack           []string `json:"tech_stack"`
 	Website             string   `json:"website"`
+	LinkedinURL         string   `json:"linkedin_url"`
 	CareersPageURL      string   `json:"careers_page_url"`
 	CompanyEmail        string   `json:"company_email"` // generic: careers@, contact@, info@
 	GithubOrg           string   `json:"github_org"`
@@ -26,15 +27,18 @@ type CompanyPageData struct {
 	TechTeamSignals     []string `json:"tech_team_signals"`
 }
 
-const CompanyExtractionPrompt = `You are extracting COMPANY-LEVEL information from a company's LinkedIn page or website.
+const CompanyExtractionPrompt = `You are extracting COMPANY-LEVEL information from a company's website or LinkedIn page.
 
-CRITICAL: Do NOT extract individual people's contact details. That is a separate step.
+CRITICAL:
+- Do NOT extract individual people's contact details.
+- LOOK FOR: The official LinkedIn company page URL (usually in footer or 'About' section).
+- LOOK FOR: The careers/jobs page URL.
 
 Rules:
 - website: the company's public website URL (not LinkedIn)
+- linkedin_url: official LinkedIn company page URL (e.g., https://www.linkedin.com/company/...)
 - careers_page_url: direct URL to their jobs/careers page if visible
-- company_email: a generic company contact address (careers@, jobs@, contact@, info@) if visible — NOT an individual's personal email
-- Do NOT include any /in/ LinkedIn profile URLs — only company-level data belongs here
+- company_email: a generic company contact address (careers@, jobs@, contact@, info@) if visible
 - company_type: TECH if core product is software/infra, TECH_ADJACENT if non-tech business with internal tech team, NON_TECH otherwise
 
 Return ONLY a valid JSON object.`

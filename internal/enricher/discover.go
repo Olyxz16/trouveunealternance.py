@@ -121,7 +121,8 @@ func (d *URLDiscoverer) discoverWithDDG(ctx context.Context, comp db.Company) (s
 	query := fmt.Sprintf("%s %s linkedin company", comp.Name, comp.City.String)
 	searchURL := fmt.Sprintf("https://duckduckgo.com/html/?q=%s", url.QueryEscape(query))
 
-	res, err := d.fetcher.Fetch(ctx, searchURL)
+	// Use ScrollAndFetch to ensure browser is used and page is loaded
+	res, err := d.fetcher.ScrollAndFetch(ctx, searchURL, 1)
 	if err != nil {
 		return "", "", fmt.Errorf("DDG search failed: %w", err)
 	}
@@ -134,7 +135,7 @@ func (d *URLDiscoverer) discoverWithDDG(ctx context.Context, comp db.Company) (s
 	// Try more general query if first one failed
 	query = fmt.Sprintf("%s linkedin company", comp.Name)
 	searchURL = fmt.Sprintf("https://duckduckgo.com/html/?q=%s", url.QueryEscape(query))
-	res, err = d.fetcher.Fetch(ctx, searchURL)
+	res, err = d.fetcher.ScrollAndFetch(ctx, searchURL, 1)
 	if err == nil {
 		w, l, err := d.classifier.ExtractURLsFromSearch(ctx, res.ContentMD, "discovery_ddg_retry")
 		if err == nil {
@@ -215,8 +216,14 @@ func (d *URLDiscoverer) discoverPeopleWithGemini(ctx context.Context, comp db.Co
 		strings.Join(titles, ", "),
 	)
 
-	system := `You are finding recruitment contacts at French companies.
-Find up to 5 people.
+	system := `You are finding recruitment contacts at French companies using search grounding.
+Find up to 5 real people who currently work at the company.
+
+CRITICAL:
+- ONLY return real people found through your search.
+- NEVER return placeholder or generic names (e.g., John Doe, Jane Smith, Mike Smith, Sarah Patel).
+- If you cannot find real individuals, return an empty list.
+
 Return ONLY a JSON object:
 {
   "contacts": [

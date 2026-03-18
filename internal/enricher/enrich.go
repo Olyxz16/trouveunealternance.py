@@ -147,10 +147,14 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID int, runID string) 
 		"description":            info.Description,
 		"tech_stack":             strings.Join(info.TechStack, ", "),
 		"website":                firstNonEmpty(info.Website, website),
+		"linkedin_url":           firstNonEmpty(info.LinkedinURL, linkedin),
 		"careers_page_url":       info.CareersPageURL,
 		"company_email":          info.CompanyEmail,
 		"has_internal_tech_team": info.HasInternalTechTeam,
 		"tech_team_signals":      strings.Join(info.TechTeamSignals, ", "),
+	}
+	if info.LinkedinURL != "" && linkedin == "" {
+		linkedin = info.LinkedinURL
 	}
 	if comp.CompanyType == "UNKNOWN" {
 		updates["company_type"] = info.CompanyType
@@ -186,17 +190,32 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID int, runID string) 
 	people, err := e.classifier.ExtractPeopleFromPage(ctx, peopleRes.ContentMD, runID)
 	log.Printf("DEBUG [%s]: ExtractPeopleFromPage result: count=%d, err=%v", comp.Name, len(people.Contacts), err)
 	
-	// Filter out obviously fake/hallucinated contacts if they came from a low-quality source
-	// (Placeholder names like "John Doe" or generic ones)
-	
+	// Filter hallucinated contacts
+	realContacts := make([]IndividualContact, 0)
+	for _, c := range people.Contacts {
+		if !isHallucinated(c) {
+			realContacts = append(realContacts, c)
+		} else {
+			log.Printf("DEBUG [%s]: Filtered hallucinated contact: %s (%s)", comp.Name, c.Name, c.Role)
+		}
+	}
+	people.Contacts = realContacts
+
 	if err != nil || len(people.Contacts) == 0 {
-		log.Printf("DEBUG [%s]: No contacts found on page, trying external search", comp.Name)
+		log.Printf("DEBUG [%s]: No real contacts found on page, trying external search", comp.Name)
 		disc := NewURLDiscoverer(e.fetcher, e.geminiAPI, e.classifier)
 		extContacts, err := disc.SearchPeopleOnLinkedIn(ctx, *comp, []string{"CTO", "Directeur Technique", "DevOps", "Recrutement", "RH", "Engineering Manager"})
 		if err == nil && len(extContacts) > 0 {
-			people.Contacts = extContacts
-		} else {
-			log.Printf("DEBUG [%s]: No contacts found even with external search", comp.Name)
+			// Filter external search too
+			for _, ec := range extContacts {
+				if !isHallucinated(ec) {
+					people.Contacts = append(people.Contacts, ec)
+				}
+			}
+		}
+		
+		if len(people.Contacts) == 0 {
+			log.Printf("DEBUG [%s]: No real contacts found even with external search", comp.Name)
 			_ = e.db.UpdateCompany(comp.ID, map[string]interface{}{"status": "NO_CONTACT_FOUND"})
 			return nil
 		}
@@ -264,4 +283,29 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+func isHallucinated(c IndividualContact) bool {
+	hallucinatedNames := []string{
+		"john doe", "jane smith", "mike smith", "sarah patel", "linda nguyen",
+		"mark brown", "emily davis", "chris johnson", "alex wilson",
+	}
+	name := strings.ToLower(c.Name)
+	for _, h := range hallucinatedNames {
+		if strings.Contains(name, h) {
+			return true
+		}
+	}
+
+	// A personal profile URL should not contain /company/
+	if strings.Contains(strings.ToLower(c.LinkedinURL), "/company/") {
+		return true
+	}
+
+	// Too short names are suspicious
+	if len(c.Name) < 3 {
+		return true
+	}
+
+	return false
 }

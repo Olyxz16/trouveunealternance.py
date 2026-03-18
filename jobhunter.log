@@ -771,3 +771,121 @@ Hook system message: [
 2026-03-18T20:16:31.214+0100	INFO	browser fetching	{"url": "https://www.linkedin.com/in/john-doe"}
 2026/03/18 20:16:57 Best contact for INSECO: Mike Smith (CTO)
 2026/03/18 20:16:57 INFO: Successfully enriched INSECO
+2026/03/18 20:27:42 INFO: Initializing enrichment pipeline...
+2026/03/18 20:27:42 INFO: Connecting to LLM providers...
+2026/03/18 20:27:42 INFO: Gemini API search grounding enabled for URL discovery
+2026/03/18 20:27:42 INFO: Launching browser instance...
+2026-03-18T20:27:42.726+0100	INFO	browser session loaded	{"cookies": "data/browser_session.json"}
+2026/03/18 20:27:42 INFO: Browser ready.
+2026/03/18 20:27:42 INFO: Enriching 1 companies...
+2026-03-18T20:27:42.727+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/inseco"}
+2026-03-18T20:27:42.727+0100	INFO	browser fetching	{"url": "https://www.linkedin.com/company/inseco"}
+2026/03/18 20:27:42 DEBUG [INSECO]: low quality fetch for https://www.linkedin.com/company/inseco (0.00), retrying with website https://inseco.com
+2026-03-18T20:27:42.728+0100	INFO	cache hit	{"url": "https://inseco.com"}
+2026/03/18 20:27:42 DEBUG [INSECO]: Website retry result: quality 0.70 via cache
+2026/03/18 20:27:42 DEBUG [INSECO]: Extracting company info from content (length: 543)
+2026/03/18 20:27:45 DEBUG [INSECO]: Company info extracted: Type=, TechStack=[]
+2026/03/18 20:27:45 DEBUG [INSECO]: Fetching people from https://www.linkedin.com/company/inseco/people/ (with scroll)
+2026-03-18T20:27:45.506+0100	INFO	scrolling and fetching	{"url": "https://www.linkedin.com/company/inseco/people/", "scrolls": 3}
+2026-03-18T20:27:45.507+0100	INFO	browser fetching	{"url": "https://www.linkedin.com/company/inseco/people/"}
+2026/03/18 20:27:45 DEBUG [INSECO]: People fetch failed: browser fetch failed for https://www.linkedin.com/company/inseco/people/: context canceled
+2026/03/18 20:27:45 DEBUG [INSECO]: Retrying contact search on website https://inseco.com
+2026-03-18T20:27:45.507+0100	INFO	cache hit	{"url": "https://inseco.com"}
+2026/03/18 20:27:45 DEBUG [INSECO]: Contact page fetched: quality 0.70, length 543 via cache
+2026/03/18 20:27:47 DEBUG [INSECO]: ExtractPeopleFromPage result: count=0, err=<nil>
+2026/03/18 20:27:47 DEBUG [INSECO]: No real contacts found on page, trying external search
+2026/03/18 20:27:47 Gemini API call (model=gemini-2.5-flash, withSearch=true)
+2026/03/18 20:28:16 DEBUG [INSECO]: Gemini people discovery failed or empty (err: <nil>). Falling back to DDG...
+2026-03-18T20:28:16.137+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/html/?q=site%3Alinkedin.com%2Fin%2F+INSECO+POITIERS+%28CTO+OR+Directeur+Technique+OR+DevOps+OR+Recrutement+OR+RH+OR+Engineering+Manager%29"}
+2026-03-18T20:28:16.137+0100	INFO	browser fetching	{"url": "https://duckduckgo.com/html/?q=site%3Alinkedin.com%2Fin%2F+INSECO+POITIERS+%28CTO+OR+Directeur+Technique+OR+DevOps+OR+Recrutement+OR+RH+OR+Engineering+Manager%29"}
+2026/03/18 20:28:16 DEBUG [INSECO]: No real contacts found even with external search
+2026/03/18 20:28:16 INFO: Successfully enriched INSECO
+2026/03/18 20:28:47 INFO: Initializing enrichment pipeline...
+2026/03/18 20:28:47 INFO: Connecting to LLM providers...
+2026/03/18 20:28:47 INFO: Gemini API search grounding enabled for URL discovery
+2026/03/18 20:28:47 INFO: Launching browser instance...
+2026-03-18T20:28:48.456+0100	INFO	browser session loaded	{"cookies": "data/browser_session.json"}
+2026/03/18 20:28:48 INFO: Browser ready.
+2026/03/18 20:28:48 INFO: Enriching 1 companies...
+2026/03/18 20:28:48 Gemini API call (model=gemini-2.5-flash, withSearch=true)
+2026/03/18 20:28:51 DEBUG [TERRENA]: Gemini discovery success: website=https://www.terrena.fr/, linkedin=https://www.linkedin.com/company/terrena/
+2026-03-18T20:28:51.633+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/terrena/"}
+2026-03-18T20:28:51.633+0100	INFO	browser fetching	{"url": "https://www.linkedin.com/company/terrena/"}
+2026/03/18 20:28:51 DEBUG [TERRENA]: low quality fetch for https://www.linkedin.com/company/terrena/ (0.00), retrying with website https://www.terrena.fr/
+2026/03/18 20:28:52 DEBUG [TERRENA]: Website retry result: quality 0.70 via http
+2026/03/18 20:28:52 DEBUG [TERRENA]: Extracting company info from content (length: 580)
+2026/03/18 20:29:25 DEBUG [TERRENA]: Company info extracted: Type=NON_TECH, TechStack=[]
+2026/03/18 20:29:25 DEBUG [TERRENA]: Fetching people from https://www.linkedin.com/company/terrena/people/ (with scroll)
+2026-03-18T20:29:25.777+0100	INFO	scrolling and fetching	{"url": "https://www.linkedin.com/company/terrena/people/", "scrolls": 3}
+2026-03-18T20:29:25.777+0100	INFO	browser fetching	{"url": "https://www.linkedin.com/company/terrena/people/"}
+2026/03/18 20:29:25 DEBUG [TERRENA]: People fetch failed: browser fetch failed for https://www.linkedin.com/company/terrena/people/: context canceled
+2026/03/18 20:29:25 DEBUG [TERRENA]: Retrying contact search on website https://www.terrena.fr/
+2026-03-18T20:29:25.777+0100	INFO	cache hit	{"url": "https://www.terrena.fr/"}
+2026/03/18 20:29:25 DEBUG [TERRENA]: Contact page fetched: quality 0.70, length 580 via cache
+2026/03/18 20:29:35 DEBUG [TERRENA]: ExtractPeopleFromPage result: count=0, err=<nil>
+2026/03/18 20:29:35 DEBUG [TERRENA]: No real contacts found on page, trying external search
+2026/03/18 20:29:35 Gemini API call (model=gemini-2.5-flash, withSearch=true)
+2026/03/18 20:30:30 DEBUG [TERRENA]: Gemini people discovery failed or empty (err: no JSON found in gemini people response). Falling back to DDG...
+2026-03-18T20:30:30.692+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/html/?q=site%3Alinkedin.com%2Fin%2F+TERRENA+CHASSENEUIL-DU-POITOU+%28CTO+OR+Directeur+Technique+OR+DevOps+OR+Recrutement+OR+RH+OR+Engineering+Manager%29"}
+2026-03-18T20:30:30.692+0100	INFO	browser fetching	{"url": "https://duckduckgo.com/html/?q=site%3Alinkedin.com%2Fin%2F+TERRENA+CHASSENEUIL-DU-POITOU+%28CTO+OR+Directeur+Technique+OR+DevOps+OR+Recrutement+OR+RH+OR+Engineering+Manager%29"}
+2026/03/18 20:30:30 DEBUG [TERRENA]: No real contacts found even with external search
+2026/03/18 20:30:30 INFO: Successfully enriched TERRENA
+2026/03/18 20:30:49 INFO: Initializing enrichment pipeline...
+2026/03/18 20:30:49 INFO: Connecting to LLM providers...
+2026/03/18 20:30:49 INFO: Gemini API search grounding enabled for URL discovery
+2026/03/18 20:30:49 INFO: Launching browser instance...
+2026-03-18T20:30:50.168+0100	INFO	browser session loaded	{"cookies": "data/browser_session.json"}
+2026/03/18 20:30:50 INFO: Browser ready.
+2026/03/18 20:30:50 INFO: Enriching 1 companies...
+2026/03/18 20:30:50 Gemini API call (model=gemini-2.5-flash, withSearch=true)
+2026/03/18 20:31:04 DEBUG [SERLI]: Gemini discovery failed or empty (err: no JSON found in gemini response). Falling back to DDG...
+2026-03-18T20:31:04.485+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/html/?q=SERLI+CHASSENEUIL-DU-POITOU+linkedin+company"}
+2026-03-18T20:31:04.485+0100	INFO	browser fetching	{"url": "https://duckduckgo.com/html/?q=SERLI+CHASSENEUIL-DU-POITOU+linkedin+company"}
+2026/03/18 20:31:04 DEBUG [SERLI]: DDG discovery result: website=, linkedin=
+2026/03/18 20:31:04 DEBUG [SERLI]: No target URL (LinkedIn or Website) found after discovery
+2026/03/18 20:31:04 INFO: Successfully enriched SERLI
+2026/03/18 20:34:57 INFO: Initializing enrichment pipeline...
+2026/03/18 20:34:57 INFO: Connecting to LLM providers...
+2026/03/18 20:34:57 INFO: Gemini API search grounding enabled for URL discovery
+2026/03/18 20:34:57 INFO: Launching browser instance...
+2026-03-18T20:34:58.336+0100	INFO	browser session loaded	{"cookies": "data/browser_session.json"}
+2026/03/18 20:34:58 INFO: Browser ready.
+2026/03/18 20:34:58 INFO: Enriching 1 companies...
+2026/03/18 20:34:58 Gemini API call (model=gemini-2.5-flash, withSearch=true)
+2026/03/18 20:35:16 DEBUG [SERLI]: Gemini discovery success: website=https://www.serli.com, linkedin=
+2026/03/18 20:35:17 DEBUG [SERLI]: Fetched https://www.serli.com: quality 1.00 via http
+2026/03/18 20:35:17 DEBUG [SERLI]: Extracting company info from content (length: 1391)
+2026/03/18 20:35:24 DEBUG [SERLI]: Company info extracted: Type=TECH, TechStack=[]
+2026/03/18 20:35:24 DEBUG [SERLI]: No LinkedIn URL available, cannot search for individuals
+2026/03/18 20:35:24 INFO: Successfully enriched SERLI
+2026/03/18 20:43:16 INFO: Initializing enrichment pipeline...
+2026/03/18 20:43:16 INFO: Connecting to LLM providers...
+2026/03/18 20:43:16 INFO: Gemini API search grounding enabled for URL discovery
+2026/03/18 20:43:16 INFO: Launching browser instance...
+2026-03-18T20:43:16.826+0100	INFO	browser session loaded	{"cookies": "data/browser_session.json"}
+2026/03/18 20:43:16 INFO: Browser ready.
+2026/03/18 20:43:16 INFO: Enriching 1 companies...
+2026/03/18 20:43:16 Gemini API call (model=gemini-2.5-flash, withSearch=true)
+2026/03/18 20:43:23 DEBUG [SERLI]: Gemini discovery failed or empty (err: empty response from Gemini API). Falling back to DDG...
+2026-03-18T20:43:23.615+0100	INFO	scrolling and fetching	{"url": "https://duckduckgo.com/html/?q=SERLI+CHASSENEUIL-DU-POITOU+linkedin+company", "scrolls": 1}
+2026-03-18T20:43:23.615+0100	INFO	browser fetching	{"url": "https://duckduckgo.com/html/?q=SERLI+CHASSENEUIL-DU-POITOU+linkedin+company"}
+2026/03/18 20:43:23 DEBUG [SERLI]: DDG discovery result: website=, linkedin=
+2026-03-18T20:43:23.616+0100	INFO	cache hit	{"url": "https://www.serli.com"}
+2026/03/18 20:43:23 DEBUG [SERLI]: Fetched https://www.serli.com: quality 1.00 via cache
+2026/03/18 20:43:23 DEBUG [SERLI]: Extracting company info from content (length: 1391)
+2026/03/18 20:43:26 DEBUG [SERLI]: Company info extracted: Type=TECH_ADJACENT, TechStack=[]
+2026/03/18 20:43:26 DEBUG [SERLI]: Fetching people from https://www.linkedin.com/company/serli/people/ (with scroll)
+2026-03-18T20:43:26.591+0100	INFO	scrolling and fetching	{"url": "https://www.linkedin.com/company/serli/people/", "scrolls": 3}
+2026-03-18T20:43:26.591+0100	INFO	browser fetching	{"url": "https://www.linkedin.com/company/serli/people/"}
+2026/03/18 20:43:26 DEBUG [SERLI]: People fetch failed: browser fetch failed for https://www.linkedin.com/company/serli/people/: context canceled
+2026/03/18 20:43:26 DEBUG [SERLI]: Retrying contact search on website https://www.serli.com
+2026-03-18T20:43:26.591+0100	INFO	cache hit	{"url": "https://www.serli.com"}
+2026/03/18 20:43:26 DEBUG [SERLI]: Contact page fetched: quality 1.00, length 1391 via cache
+2026/03/18 20:43:31 DEBUG [SERLI]: ExtractPeopleFromPage result: count=0, err=<nil>
+2026/03/18 20:43:31 DEBUG [SERLI]: No real contacts found on page, trying external search
+2026/03/18 20:43:31 Gemini API call (model=gemini-2.5-flash, withSearch=true)
+2026/03/18 20:44:26 DEBUG [SERLI]: Gemini people discovery failed or empty (err: no JSON found in gemini people response). Falling back to DDG...
+2026-03-18T20:44:26.285+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/html/?q=site%3Alinkedin.com%2Fin%2F+SERLI+CHASSENEUIL-DU-POITOU+%28CTO+OR+Directeur+Technique+OR+DevOps+OR+Recrutement+OR+RH+OR+Engineering+Manager%29"}
+2026-03-18T20:44:26.285+0100	INFO	browser fetching	{"url": "https://duckduckgo.com/html/?q=site%3Alinkedin.com%2Fin%2F+SERLI+CHASSENEUIL-DU-POITOU+%28CTO+OR+Directeur+Technique+OR+DevOps+OR+Recrutement+OR+RH+OR+Engineering+Manager%29"}
+2026/03/18 20:44:26 DEBUG [SERLI]: No real contacts found even with external search
+2026/03/18 20:44:26 INFO: Successfully enriched SERLI

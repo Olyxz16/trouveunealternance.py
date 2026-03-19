@@ -205,7 +205,7 @@ func (d *URLDiscoverer) SearchPeopleOnLinkedIn(ctx context.Context, comp db.Comp
 		searchURL := fmt.Sprintf("https://duckduckgo.com/html/?q=%s", url.QueryEscape(query))
 
 		// Use a dedicated timeout for each search attempt
-		searchCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+		searchCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 		res, err := d.fetcher.ScrollAndFetch(searchCtx, searchURL, 0)
 		cancel()
 

@@ -53,9 +53,18 @@ Return a JSON object with a single field "contacts" containing the list.`
 
 const ContactRankingPrompt = `Given this list of contacts at a %s company, pick the single BEST person to cold-email for a DevOps/backend internship.
 
-Priority order: CTO > Engineering Manager > Tech Lead > Infrastructure Manager > IT Director > Technical Recruiter > HR Manager
+Priority order: 
+1. Technical Leadership: CTO, VP Engineering, Engineering Manager, Tech Lead, Infrastructure Manager, IT Director.
+2. Recruitment: Technical Recruiter, Talent Acquisition, HR Manager (only if technical people are missing).
+3. Founders/Management: CEO, Founder, President (good fallbacks for small companies).
+4. Peers: DevOps Engineer, Backend Developer, SRE (fallbacks if no leadership found).
 
-Return a JSON object with field "best" containing the chosen contact object (same fields as input), or null if none are suitable.`
+RULES:
+- If NO perfect match from group 1 or 2 is found, pick the best candidate from group 3 or 4.
+- NEVER return null if at least one real person with a LinkedIn profile is provided. 
+- Avoid people in completely unrelated departments (Sales, Marketing, Legal) unless they are the only ones.
+
+Return a JSON object with field "best" containing the chosen contact object (same fields as input).`
 
 const IndividualProfilePrompt = `You are extracting information from a personal LinkedIn profile page.
 

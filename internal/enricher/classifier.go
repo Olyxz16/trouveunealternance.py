@@ -173,3 +173,22 @@ Description: %s%s`,
 
 	return score, nil
 }
+
+const LinkDiscoveryPrompt = `You are identifying interesting links on a company website to find recruitment or team information.
+
+LOOK FOR:
+- Careers, Jobs, "Nous rejoindre", "Recrutement"
+- Team, "L'équipe", "Qui sommes-nous ?", "About us"
+- Contact, "Nous contacter"
+
+Return a JSON array of relative or absolute URLs. Focus on the TOP 3 most relevant links.`
+
+func (c *Classifier) ExtractInterestingLinks(ctx context.Context, markdown string, runID string) ([]string, error) {
+	var links []string
+	req := llm.CompletionRequest{
+		System: LinkDiscoveryPrompt,
+		User:   fmt.Sprintf("Website content (Markdown):\n\n%s", markdown),
+	}
+	err := c.llm.CompleteJSON(ctx, req, "extract_links", runID, &links)
+	return links, err
+}

@@ -123,13 +123,28 @@ func (f *BrowserFetcher) Fetch(ctx context.Context, url string) (string, error) 
 
 	err := chromedp.Run(timeoutCtx,
 		chromedp.Navigate(url),
-		chromedp.WaitReady("body", chromedp.ByQuery),
+		// Wait for body to be visible
+		chromedp.WaitVisible("body", chromedp.ByQuery),
 		chromedp.ActionFunc(func(ctx context.Context) error {
-			// Optional cookie clicker
-			_ = chromedp.Click(`button[data-control-name="ga-cookie.accept_all"]`, chromedp.ByQuery).Do(ctx)
+			// Try to click multiple common cookie banner selectors
+			selectors := []string{
+				`button[data-control-name="ga-cookie.accept_all"]`,
+				`button#onetrust-accept-btn-handler`,
+				`button.accept-all`,
+				`button[aria-label="Accept all"]`,
+				`.cookie-banner button`,
+			}
+			for _, sel := range selectors {
+				var nodes []*cdp.Node
+				if err := chromedp.Nodes(sel, &nodes, chromedp.AtLeast(0)).Do(ctx); err == nil && len(nodes) > 0 {
+					_ = chromedp.Click(sel, chromedp.ByQuery).Do(ctx)
+					time.Sleep(500 * time.Millisecond)
+				}
+			}
 			return nil
 		}),
-		chromedp.Sleep(2000*time.Millisecond),
+		// Additional sleep to let things settle
+		chromedp.Sleep(3000*time.Millisecond),
 		chromedp.OuterHTML("html", &html, chromedp.ByQuery),
 	)
 	if err != nil {
@@ -195,9 +210,22 @@ func (f *BrowserFetcher) FetchWithScroll(ctx context.Context, url string, scroll
 
 	actions := []chromedp.Action{
 		chromedp.Navigate(url),
-		chromedp.WaitReady("body", chromedp.ByQuery),
+		chromedp.WaitVisible("body", chromedp.ByQuery),
 		chromedp.ActionFunc(func(ctx context.Context) error {
-			_ = chromedp.Click(`button[data-control-name="ga-cookie.accept_all"]`, chromedp.ByQuery).Do(ctx)
+			selectors := []string{
+				`button[data-control-name="ga-cookie.accept_all"]`,
+				`button#onetrust-accept-btn-handler`,
+				`button.accept-all`,
+				`button[aria-label="Accept all"]`,
+				`.cookie-banner button`,
+			}
+			for _, sel := range selectors {
+				var nodes []*cdp.Node
+				if err := chromedp.Nodes(sel, &nodes, chromedp.AtLeast(0)).Do(ctx); err == nil && len(nodes) > 0 {
+					_ = chromedp.Click(sel, chromedp.ByQuery).Do(ctx)
+					time.Sleep(500 * time.Millisecond)
+				}
+			}
 			return nil
 		}),
 		chromedp.Sleep(3000 * time.Millisecond),

@@ -120,13 +120,11 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID int, runID string) 
 		}
 		if err != nil || res.Quality < 0.3 {
 			log.Printf("DEBUG [%s]: Fetch failed or quality too low (%.2f) for both LinkedIn and Website", comp.Name, res.Quality)
-			// guessed URL was wrong — clear it if we wrote it
-			if strings.Contains(targetURL, "linkedin.com") &&
-				targetURL != comp.LinkedinURL.String {
-				_ = e.db.UpdateCompany(comp.ID, map[string]interface{}{
-					"linkedin_url": "",
-				})
+			// guessed URL was wrong — mark as invalid instead of clearing
+			if targetURL != "" {
+				e.markURLInvalid(comp, targetURL)
 			}
+
 			_ = e.db.UpdateCompany(comp.ID, map[string]interface{}{
 				"status": "NO_CONTACT_FOUND",
 			})
@@ -168,27 +166,65 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID int, runID string) 
 		return nil
 	}
 
+	var people PeoplePageData
 	peopleURL := strings.TrimSuffix(linkedin, "/") + "/people/"
 	log.Printf("DEBUG [%s]: Fetching people from %s (with scroll)", comp.Name, peopleURL)
 	peopleRes, err := e.fetcher.ScrollAndFetch(ctx, peopleURL, 3)
-	if err != nil {
-		log.Printf("DEBUG [%s]: People fetch failed: %v", comp.Name, err)
-		// Fallback to website if LinkedIn failed
-		if website != "" {
-			log.Printf("DEBUG [%s]: Retrying contact search on website %s", comp.Name, website)
-			peopleRes, err = e.fetcher.Fetch(ctx, website)
+	if err == nil && peopleRes.Quality >= 0.2 {
+		p, err := e.classifier.ExtractPeopleFromPage(ctx, peopleRes.ContentMD, runID)
+		if err == nil {
+			people.Contacts = append(people.Contacts, p.Contacts...)
 		}
 	}
 
-	if err != nil || peopleRes.Quality < 0.2 {
-		log.Printf("DEBUG [%s]: No reliable contact page found (err: %v)", comp.Name, err)
-		_ = e.db.UpdateCompany(comp.ID, map[string]interface{}{"status": "NO_CONTACT_FOUND"})
-		return nil
+	if err != nil || len(people.Contacts) == 0 {
+		if err != nil {
+			log.Printf("DEBUG [%s]: People fetch failed or no contacts: %v", comp.Name, err)
+		}
+		// Fallback to website if LinkedIn failed or no contacts found
+		if website != "" {
+			log.Printf("DEBUG [%s]: Retrying contact search on website %s", comp.Name, website)
+			
+			// EXPLORATION PHASE: find interesting links first
+			log.Printf("DEBUG [%s]: Exploring website for interesting links...", comp.Name)
+			mainRes, err := e.fetcher.Fetch(ctx, website)
+			if err == nil {
+				links, _ := e.classifier.ExtractInterestingLinks(ctx, mainRes.ContentMD, runID)
+				log.Printf("DEBUG [%s]: Interesting links found: %v", comp.Name, links)
+				
+				// Try these links in order of importance
+				for _, link := range links {
+					// resolve relative URLs
+					target := link
+					if !strings.HasPrefix(link, "http") {
+						base := strings.TrimSuffix(website, "/")
+						if !strings.HasPrefix(link, "/") {
+							target = base + "/" + link
+						} else {
+							target = base + link
+						}
+					}
+					
+					log.Printf("DEBUG [%s]: Visiting explored link: %s", comp.Name, target)
+					subRes, err := e.fetcher.Fetch(ctx, target)
+					if err == nil && subRes.Quality >= 0.5 {
+						// Extract people from this page
+						p, _ := e.classifier.ExtractPeopleFromPage(ctx, subRes.ContentMD, runID)
+						if len(p.Contacts) > 0 {
+							log.Printf("DEBUG [%s]: Found %d contacts on %s", comp.Name, len(p.Contacts), target)
+							people.Contacts = append(people.Contacts, p.Contacts...)
+						}
+					}
+				}
+			}
+			
+			// Final fallback to main page if no contacts found yet
+			if len(people.Contacts) == 0 && mainRes.Quality >= 0.2 {
+				p, _ := e.classifier.ExtractPeopleFromPage(ctx, mainRes.ContentMD, runID)
+				people.Contacts = append(people.Contacts, p.Contacts...)
+			}
+		}
 	}
-	log.Printf("DEBUG [%s]: Contact page fetched: quality %.2f, length %d via %s", comp.Name, peopleRes.Quality, len(peopleRes.ContentMD), peopleRes.Method)
-
-	people, err := e.classifier.ExtractPeopleFromPage(ctx, peopleRes.ContentMD, runID)
-	log.Printf("DEBUG [%s]: ExtractPeopleFromPage result: count=%d, err=%v", comp.Name, len(people.Contacts), err)
 	
 	for i := range people.Contacts {
 		if isHallucinated(people.Contacts[i]) {
@@ -338,4 +374,17 @@ func isHallucinated(c IndividualContact) bool {
 	}
 
 	return false
+}
+
+func (e *Enricher) markURLInvalid(comp *db.Company, invalidURL string) {
+	current := comp.InvalidURLs.String
+	if current == "" {
+		current = invalidURL
+	} else if !strings.Contains(current, invalidURL) {
+		current = current + ", " + invalidURL
+	}
+	comp.InvalidURLs = db.ToNullString(current)
+	_ = e.db.UpdateCompany(comp.ID, map[string]interface{}{
+		"invalid_urls": current,
+	})
 }

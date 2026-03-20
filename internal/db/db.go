@@ -177,59 +177,9 @@ func (db *DB) initMigrations() error {
 			return err
 		}
 
-		// Special handling for 011_company_email.sql to be idempotent
-		if name == "011_company_email.sql" {
-			_, err := tx.Exec(string(content))
-			if err != nil {
-				if !strings.Contains(err.Error(), "duplicate column name") {
-					tx.Rollback()
-					return fmt.Errorf("failed to apply migration %s: %w", name, err)
-				}
-			}
-			// Already executed content above, record it and commit
-			if _, err := tx.Exec("INSERT INTO schema_migrations (name) VALUES (?)", name); err != nil {
-				tx.Rollback()
-				return fmt.Errorf("failed to record migration %s: %w", name, err)
-			}
-			if err := tx.Commit(); err != nil {
-				return err
-			}
-			continue
-		}
-
 		if _, err := tx.Exec(string(content)); err != nil {
 			tx.Rollback()
 			return fmt.Errorf("failed to apply migration %s: %w", name, err)
-		}
-
-		// Special handling for 001_contacts.sql to be idempotent and safe
-		if name == "001_contacts.sql" {
-			alters := []string{
-				"ALTER TABLE companies ADD COLUMN primary_contact_id INTEGER REFERENCES contacts(id)",
-				"ALTER TABLE companies ADD COLUMN company_type TEXT DEFAULT 'UNKNOWN' CHECK(company_type IN ('TECH', 'TECH_ADJACENT', 'NON_TECH', 'UNKNOWN'))",
-				"ALTER TABLE companies ADD COLUMN has_internal_tech_team INTEGER DEFAULT NULL",
-				"ALTER TABLE companies ADD COLUMN tech_team_signals TEXT",
-			}
-			for _, sql := range alters {
-				_, err := tx.Exec(sql)
-				if err != nil {
-					if !strings.Contains(err.Error(), "duplicate column name") {
-						tx.Rollback()
-						return fmt.Errorf("failed to alter table in migration %s: %w", name, err)
-					}
-				}
-			}
-
-			// Update primary_contact_id for existing ones
-			_, err = tx.Exec(`
-				UPDATE companies SET primary_contact_id = (
-					SELECT id FROM contacts WHERE company_id = companies.id LIMIT 1
-				) WHERE primary_contact_id IS NULL
-			`)
-			if err != nil {
-				tx.Rollback()
-				return fmt.Errorf("failed to update primary_contact_id in migration %s: %w", name, err)
-			}
 		}
 
 		if _, err := tx.Exec("INSERT INTO schema_migrations (name) VALUES (?)", name); err != nil {

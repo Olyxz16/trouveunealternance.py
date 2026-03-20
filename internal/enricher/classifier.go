@@ -128,14 +128,12 @@ func (c *Classifier) ScoreCompany(ctx context.Context, comp db.Company, runID st
 	prompt := fmt.Sprintf(`Company: %s
 NAF: %s - %s
 City: %s
-Size: %s employees
-Description: %s%s`,
+Size: %s employees%s`,
 		comp.Name,
 		comp.NAFCode.String,
 		comp.NAFLabel.String,
 		comp.City.String,
 		comp.HeadcountRange.String,
-		comp.Description.String,
 		currentInfo,
 	)
 

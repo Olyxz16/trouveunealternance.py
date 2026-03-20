@@ -155,10 +155,7 @@ func (s *SireneCollector) Scan(ctx context.Context, departments []string, minHea
 		}
 
 		siren := record[0]
-		siret := record[1]
 		nameRaw := record[2]
-		legalName := record[3]
-		acronym := record[4]
 		naf := record[5]
 		hcCode := record[6]
 		zip := record[7]
@@ -196,17 +193,12 @@ func (s *SireneCollector) Scan(ctx context.Context, departments []string, minHea
 
 		c := &db.Company{
 			Name:           cleanCompanyName(nameRaw),
-			LegalName:      db.ToNullString(legalName),
-			Acronym:        db.ToNullString(acronym),
-			NameNormalized: db.ToNullString(normalizeName(nameRaw)),
 			Siren:          db.ToNullString(siren),
-			Siret:          db.ToNullString(siret),
 			NAFCode:        db.ToNullString(naf),
 			NAFLabel:       db.ToNullString(NAF_LABELS[cleanNAF]),
 			City:           db.ToNullString(city),
 			Department:     db.ToNullString(zip[:2]),
 			HeadcountRange: db.ToNullString(headcountLabel(hcCode)),
-			Source:         db.ToNullString("sirene"),
 			CompanyType:    companyType,
 			Status:         status,
 		}

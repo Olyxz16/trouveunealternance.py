@@ -36,7 +36,6 @@ Company Context:
 - Name: %s
 - Type: %s
 - Tech Stack: %s
-- Description: %s
 
 Recipient:
 - Name: %s
@@ -87,7 +86,7 @@ func (g *Generator) GenerateDrafts(ctx context.Context, companyID int, contactID
 	
 	req := llm.CompletionRequest{
 		System: fmt.Sprintf(DraftGenerationPrompt,
-			comp.Name, comp.CompanyType, comp.TechStack.String, comp.Description.String,
+			comp.Name, comp.CompanyType, comp.TechStack.String,
 			targetContact.Name.String, targetContact.Role.String,
 			profile.Name, profile.School, strings.Join(profile.Skills, ", "),
 			string(projectsJSON), profile.Availability, profile.Duration,

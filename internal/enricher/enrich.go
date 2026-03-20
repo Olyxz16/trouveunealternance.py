@@ -165,10 +165,6 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID int, runID string) 
 		}
 		if err != nil || res.Quality < 0.3 {
 			log.Printf("DEBUG [%s]: Fetch failed or quality too low (%.2f) for both LinkedIn and Website", comp.Name, res.Quality)
-			// guessed URL was wrong — mark as invalid instead of clearing
-			if targetURL != "" {
-				e.markURLInvalid(comp, targetURL)
-			}
 
 			_ = e.db.UpdateCompany(comp.ID, map[string]interface{}{
 				"status": "NO_CONTACT_FOUND",
@@ -193,7 +189,6 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID int, runID string) 
 	log.Printf("DEBUG [%s]: Company info extracted: Type=%s, TechStack=%v", comp.Name, info.CompanyType, info.TechStack)
 
 	updates := map[string]interface{}{
-		"description":            info.Description,
 		"tech_stack":             strings.Join(info.TechStack, ", "),
 		"website":                firstNonEmpty(info.Website, website),
 		"linkedin_url":           firstNonEmpty(info.LinkedinURL, linkedin),
@@ -478,17 +473,4 @@ func isHallucinated(c IndividualContact) bool {
 	}
 
 	return false
-}
-
-func (e *Enricher) markURLInvalid(comp *db.Company, invalidURL string) {
-	current := comp.InvalidURLs.String
-	if current == "" {
-		current = invalidURL
-	} else if !strings.Contains(current, invalidURL) {
-		current = current + ", " + invalidURL
-	}
-	comp.InvalidURLs = db.ToNullString(current)
-	_ = e.db.UpdateCompany(comp.ID, map[string]interface{}{
-		"invalid_urls": current,
-	})
 }

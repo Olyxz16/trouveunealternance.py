@@ -40,7 +40,7 @@ var evalCmd = &cobra.Command{
 		var err error
 
 		if evalAll {
-			companies, err = getAllCompanies()
+			companies, err = getEnrichedCompaniesAll()
 		} else {
 			companies, err = getEnrichedCompanies(evalBatch)
 		}
@@ -51,7 +51,7 @@ var evalCmd = &cobra.Command{
 		}
 
 		if len(companies) == 0 {
-			fmt.Println("No companies found for evaluation.")
+			fmt.Println("No enriched companies found for evaluation.")
 			return
 		}
 
@@ -101,6 +101,8 @@ var evalCmd = &cobra.Command{
 
 		aggregate := eval.ComputeAggregate(companyScores, contactScores, allPenalties, totalContacts)
 
+		filterMetrics := getFilterMetrics()
+
 		metadata := eval.ReportMetadata{
 			LLMPrimaryProvider:  cfg.LLMPrimary,
 			LLMPrimaryModel:     cfg.OpenRouterModel,
@@ -123,7 +125,7 @@ var evalCmd = &cobra.Command{
 			return
 		}
 
-		printScorecard(report)
+		printScorecard(report, filterMetrics)
 
 		path, err := eval.SaveReport(report, evalOutput)
 		if err != nil {
@@ -140,10 +142,34 @@ func getAllCompanies() ([]db.Company, error) {
 	return companies, err
 }
 
+func getEnrichedCompaniesAll() ([]db.Company, error) {
+	var companies []db.Company
+	err := database.Where("status != 'NEW'").Order("id").Find(&companies).Error
+	return companies, err
+}
+
 func getEnrichedCompanies(limit int) ([]db.Company, error) {
 	var companies []db.Company
 	err := database.Where("status IN ('TO_CONTACT', 'NO_CONTACT_FOUND')").Order("id").Limit(limit).Find(&companies).Error
 	return companies, err
+}
+
+type filterMetrics struct {
+	TotalCompanies int64
+	NewUnscored    int64
+	ScoredZero     int64
+	ScoredPositive int64
+	SkippedNonTech int64
+}
+
+func getFilterMetrics() filterMetrics {
+	var m filterMetrics
+	database.Model(&db.Company{}).Count(&m.TotalCompanies)
+	database.Model(&db.Company{}).Where("status = 'NEW' AND relevance_score = 0").Count(&m.NewUnscored)
+	database.Model(&db.Company{}).Where("status = 'NEW' AND relevance_score > 0").Count(&m.ScoredPositive)
+	database.Model(&db.Company{}).Where("status = 'NEW' AND relevance_score = 0").Count(&m.ScoredZero)
+	m.SkippedNonTech = m.TotalCompanies - m.NewUnscored - m.ScoredZero - m.ScoredPositive
+	return m
 }
 
 func loadUserName() string {
@@ -169,7 +195,7 @@ func getCommitHash() string {
 	return strings.TrimSpace(string(out))
 }
 
-func printScorecard(report eval.Report) {
+func printScorecard(report eval.Report, fm filterMetrics) {
 	m := report.Aggregate
 	meta := report.Metadata
 
@@ -179,6 +205,13 @@ func printScorecard(report eval.Report) {
 	fmt.Printf("Models: %s/%s + gemini/%s (search=%v)\n\n",
 		meta.LLMPrimaryProvider, meta.LLMPrimaryModel,
 		meta.GeminiModel, meta.GeminiAPIEnabled)
+
+	fmt.Println("Pipeline Filter Metrics:")
+	fmt.Printf("  Total companies in DB:    %d\n", fm.TotalCompanies)
+	fmt.Printf("  NEW (unscored):           %d (skipped by enrich)\n", fm.NewUnscored)
+	fmt.Printf("  NEW (scored 0, skipped):  %d (deemed irrelevant)\n", fm.ScoredZero)
+	fmt.Printf("  NEW (scored >0, eligible):%d\n", fm.ScoredPositive)
+	fmt.Printf("  Already enriched:         %d\n\n", fm.TotalCompanies-fm.NewUnscored-fm.ScoredZero-fm.ScoredPositive)
 
 	fmt.Println("Company Benchmark (website + linkedin):")
 	fmt.Printf("  Average: %.1f/100  |  Pass Rate: %.0f%%\n\n",

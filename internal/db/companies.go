@@ -25,7 +25,7 @@ func (db *DB) UpsertCompany(c *Company) (uint, bool, error) {
 	if result.Error == nil && existing.ID != 0 {
 		return existing.ID, false, nil
 	}
-	
+
 	err := db.Create(c).Error
 	return c.ID, true, err
 }
@@ -50,4 +50,28 @@ func (db *DB) GetJobs(limit int) ([]Job, error) {
 	var jobs []Job
 	err := db.Order("relevance_score desc, date_found desc").Limit(limit).Find(&jobs).Error
 	return jobs, err
+}
+
+func (db *DB) ResetCompanyForEnrichment(id uint) error {
+	tx := db.Begin()
+	if err := tx.Model(&Company{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"status":                 "NEW",
+		"primary_contact_id":     0,
+		"company_type":           "UNKNOWN",
+		"website":                "",
+		"linkedin_url":           "",
+		"careers_page_url":       "",
+		"company_email":          "",
+		"tech_stack":             "",
+		"has_internal_tech_team": nil,
+		"tech_team_signals":      "",
+	}).Error; err != nil {
+		tx.Rollback()
+		return err
+	}
+	if err := tx.Where("company_id = ?", id).Delete(&Contact{}).Error; err != nil {
+		tx.Rollback()
+		return err
+	}
+	return tx.Commit().Error
 }

@@ -61,6 +61,18 @@ tasks:
 
   # ── UTILS ───────────────────────────────────────────────────────────────────
 
+  eval:
+    desc: Evaluate enrichment accuracy (use BATCH=20)
+    cmds:
+      - mkdir -p data/eval
+      - go run . eval --batch {{.BATCH}}
+
+  eval-all:
+    desc: Evaluate all companies in DB
+    cmds:
+      - mkdir -p data/eval
+      - go run . eval --all
+
   wipe:
     desc: Wipe the entire database (delete file)
     cmds:

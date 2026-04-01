@@ -3,6 +3,7 @@ package eval
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -30,10 +31,24 @@ var (
 	}
 )
 
+type CompanyBreakdown struct {
+	WebsiteFound     bool `json:"website_found"`
+	WebsiteResolves  bool `json:"website_resolves"`
+	LinkedinFound    bool `json:"linkedin_found"`
+	CareersPageFound bool `json:"careers_page_found"`
+	CareersResolves  bool `json:"careers_resolves"`
+}
+
 type CompanyScore struct {
-	WebsiteFound  bool `json:"website_found"`
-	LinkedinFound bool `json:"linkedin_found"`
-	Total         int  `json:"total"`
+	Breakdown CompanyBreakdown `json:"breakdown"`
+	Total     int              `json:"total"`
+}
+
+var httpClient = &http.Client{
+	Timeout: 10 * time.Second,
+	CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	},
 }
 
 type ContactBreakdown struct {
@@ -58,14 +73,15 @@ type Penalty struct {
 }
 
 type CompanyEvaluation struct {
-	ID             uint      `json:"id"`
-	Name           string    `json:"name"`
-	CompanyScore   int       `json:"company_score"`
-	ContactScore   int       `json:"contact_score"`
-	ContactsCount  int       `json:"contacts_count"`
-	ContactDetails []string  `json:"contact_details"`
-	Penalties      []Penalty `json:"penalties"`
-	Status         string    `json:"status"`
+	ID               uint             `json:"id"`
+	Name             string           `json:"name"`
+	CompanyScore     int              `json:"company_score"`
+	CompanyBreakdown CompanyBreakdown `json:"company_breakdown"`
+	ContactScore     int              `json:"contact_score"`
+	ContactsCount    int              `json:"contacts_count"`
+	ContactDetails   []string         `json:"contact_details"`
+	Penalties        []Penalty        `json:"penalties"`
+	Status           string           `json:"status"`
 }
 
 type AggregateMetrics struct {
@@ -104,19 +120,64 @@ type Report struct {
 }
 
 func ScoreCompany(comp *db.Company) CompanyScore {
-	score := CompanyScore{}
+	score := CompanyScore{
+		Breakdown: CompanyBreakdown{},
+	}
 
 	if isValidWebsite(comp.Website) {
-		score.WebsiteFound = true
-		score.Total += 50
+		score.Breakdown.WebsiteFound = true
+		score.Total += 30
+		if urlResolves(comp.Website) {
+			score.Breakdown.WebsiteResolves = true
+			score.Total += 20
+		}
 	}
 
 	if isValidCompanyLinkedIn(comp.LinkedinURL) {
-		score.LinkedinFound = true
-		score.Total += 50
+		score.Breakdown.LinkedinFound = true
+		score.Total += 30
+	}
+
+	if isValidURL(comp.CareersPageURL) {
+		score.Breakdown.CareersPageFound = true
+		score.Total += 10
+		if urlResolves(comp.CareersPageURL) {
+			score.Breakdown.CareersResolves = true
+			score.Total += 10
+		}
 	}
 
 	return score
+}
+
+func isValidURL(raw string) bool {
+	if raw == "" {
+		return false
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	return u.Scheme != "" && u.Host != ""
+}
+
+func urlResolves(raw string) bool {
+	if raw == "" {
+		return false
+	}
+	resp, err := httpClient.Head(raw)
+	if err != nil {
+		req, _ := http.NewRequest("GET", raw, nil)
+		if req != nil {
+			req.Header.Set("User-Agent", "Mozilla/5.0")
+			resp, err = httpClient.Do(req)
+		}
+	}
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode < 400
 }
 
 func ScoreContacts(comp *db.Company, contacts []db.Contact, userName string) (ContactScore, []Penalty) {
@@ -358,7 +419,7 @@ func ComputeAggregate(companyScores []CompanyScore, contactScores []ContactScore
 	var companyPass int
 	for _, cs := range companyScores {
 		companySum += cs.Total
-		if cs.Total >= 100 {
+		if cs.Total >= 80 {
 			companyPass++
 		}
 	}

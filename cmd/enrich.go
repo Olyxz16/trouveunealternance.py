@@ -3,14 +3,12 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"io"
 	"jobhunter/internal/db"
 	"jobhunter/internal/enricher"
 	"jobhunter/internal/llm"
 	"jobhunter/internal/pipeline"
 	"jobhunter/internal/scraper"
 	"jobhunter/internal/tui"
-	"log"
 	"os"
 	"strings"
 	"time"
@@ -51,7 +49,10 @@ func (r *TUIReporter) Log(msg pipeline.LogMsg) {
 	if !r.noTUI {
 		r.logCh <- msg
 	} else {
-		log.Printf("%s: %s", msg.Level, msg.Text)
+		// Fallback to zLogger if noTUI
+		if zLogger != nil {
+			zLogger.Info(msg.Text, zap.String("step", "reporter"))
+		}
 	}
 }
 
@@ -84,41 +85,32 @@ var enrichCmd = &cobra.Command{
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		// 1. Redirect logs to file immediately to keep terminal clean
-		var logWriter io.Writer
+		// 1. Redirect logs to file
 		logFile, err := os.OpenFile("jobhunter.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: Failed to open log file: %v\n", err)
 			os.Exit(1)
 		}
 		defer logFile.Close()
-		
-		if noTUI {
-			logWriter = io.MultiWriter(os.Stdout, logFile)
-		} else {
-			logWriter = logFile
-		}
-		log.SetOutput(logWriter)
 
 		// 2. Pre-flight: Get companies
 		var targetCompanies []db.Company
 		if companyID != 0 {
 			c, err := database.GetCompany(uint(companyID))
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error: Failed to get company %d: %v\n", companyID, err)
+				zLogger.Error("Failed to get company", zap.Int("id", companyID), zap.Error(err))
 				os.Exit(1)
 			}
 			targetCompanies = append(targetCompanies, *c)
 		} else {
 			companies, err := database.GetCompaniesForEnrichment()
 			if err != nil {
-				log.Printf("Error: Failed to query database: %v", err)
-				fmt.Fprintf(os.Stderr, "Error: Failed to query database: %v\n", err)
+				zLogger.Error("Failed to query database", zap.Error(err))
 				os.Exit(1)
 			}
 
 			for _, c := range companies {
-				if c.Status == "NEW" && c.RelevanceScore > 0 {
+				if c.Status == "NEW" && c.RelevanceScore > 0 && c.CompanyType != "NON_TECH" {
 					targetCompanies = append(targetCompanies, c)
 				}
 			}
@@ -133,19 +125,19 @@ var enrichCmd = &cobra.Command{
 			return
 		}
 
-		// 4. Setup TUI and background worker
+		// 3. Setup TUI and background worker
 		logCh := make(chan pipeline.LogMsg, 100)
 		m := tui.NewPipelineModel(runID, logCh)
 		p := tea.NewProgram(m, tea.WithAltScreen())
 
-		// 3. Setup zap logger for the components
+		// Setup custom zap logger for this run
 		encoderConfig := zap.NewDevelopmentEncoderConfig()
 		fileCore := zapcore.NewCore(
 			zapcore.NewConsoleEncoder(encoderConfig),
 			zapcore.AddSync(logFile),
 			zap.InfoLevel,
 		)
-		
+
 		var core zapcore.Core
 		if noTUI {
 			core = fileCore
@@ -156,14 +148,13 @@ var enrichCmd = &cobra.Command{
 			}
 			core = zapcore.NewTee(fileCore, tuiCore)
 		}
-		
-		logger := zap.New(core)
-		defer logger.Sync()
+
+		runLogger := zap.New(core)
+		defer runLogger.Sync()
 
 		worker := func() {
 			reporter := &TUIReporter{program: p, noTUI: noTUI, logCh: logCh}
 
-			// Small delay to ensure TUI has started and received WindowSizeMsg
 			if !noTUI {
 				time.Sleep(100 * time.Millisecond)
 				p.Send(tui.TotalUpdateMsg(len(targetCompanies)))
@@ -172,14 +163,14 @@ var enrichCmd = &cobra.Command{
 
 			// Setup LLM
 			reporter.Log(pipeline.LogMsg{Level: "INFO", Text: "Connecting to LLM providers..."})
-			primary, fallback := llm.InitProviders(cfg.LLMPrimary, cfg.LLMFallback, cfg)
+			primary, fallback := llm.InitProviders(cfg.LLMPrimary, cfg.LLMFallback, cfg, runLogger)
 
-			llmClient := llm.NewClient(primary, fallback, cfg.OpenRouterRPM, database, logger)
+			llmClient := llm.NewClient(primary, fallback, cfg.OpenRouterRPM, database, runLogger)
 			classifier := enricher.NewClassifier(llmClient, database)
 
 			var geminiAPI *llm.GeminiAPIProvider
 			if cfg.GeminiAPIKey != "" {
-				geminiAPI = llm.NewGeminiAPIProvider(cfg.GeminiAPIKey, cfg.GeminiAPIModel)
+				geminiAPI = llm.NewGeminiAPIProvider(cfg.GeminiAPIKey, cfg.GeminiAPIModel, runLogger)
 				reporter.Log(pipeline.LogMsg{Level: "INFO", Text: "Gemini API search grounding enabled for URL discovery"})
 			} else {
 				reporter.Log(pipeline.LogMsg{Level: "WARN", Text: "GEMINI_API_KEY not set — falling back to DuckDuckGo for discovery"})
@@ -193,7 +184,8 @@ var enrichCmd = &cobra.Command{
 				cfg.BrowserDisplay,
 				cfg.BrowserHeadless,
 				cfg.BrowserBinaryPath,
-				logger,
+				runLogger,
+				cfg,
 			)
 			if err != nil {
 				reporter.Log(pipeline.LogMsg{Level: "WARN", Text: fmt.Sprintf("Browser failed: %v. Using HTTP only.", err)})
@@ -204,8 +196,8 @@ var enrichCmd = &cobra.Command{
 
 			forceDomains := strings.Split(cfg.ForceBrowserDomains, ",")
 			extractor := scraper.NewExtractor()
-			cascade := scraper.NewCascadeFetcher(httpFetcher, browserFetcher, forceDomains, database, extractor, logger)
-			enr := enricher.NewEnricher(database, cascade, classifier, geminiAPI)
+			cascade := scraper.NewCascadeFetcher(httpFetcher, browserFetcher, forceDomains, database, extractor, runLogger, cfg)
+			enr := enricher.NewEnricher(database, cfg, cascade, classifier, geminiAPI, runLogger)
 			enr.SetReporter(reporter)
 
 			if !noTUI {
@@ -216,7 +208,7 @@ var enrichCmd = &cobra.Command{
 			// Start Processing
 			for _, c := range targetCompanies {
 				err := enr.EnrichCompany(ctx, c.ID, runID)
-				
+
 				if err != nil {
 					reporter.Update(pipeline.ProgressUpdate{
 						ID:      int(c.ID),
@@ -235,7 +227,7 @@ var enrichCmd = &cobra.Command{
 					})
 					reporter.Log(pipeline.LogMsg{Level: "INFO", Text: fmt.Sprintf("Successfully enriched %s", c.Name)})
 				}
-				
+
 				time.Sleep(1 * time.Second)
 			}
 			if !noTUI {
@@ -247,10 +239,8 @@ var enrichCmd = &cobra.Command{
 			worker()
 		} else {
 			go worker()
-			// Start TUI (blocks until exit)
 			if _, err := p.Run(); err != nil {
-				log.SetOutput(os.Stderr) // restore for final error
-				log.Fatalf("TUI Error: %v", err)
+				zLogger.Fatal("TUI Error", zap.Error(err))
 			}
 		}
 	},

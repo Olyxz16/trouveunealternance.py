@@ -88,14 +88,15 @@ var evalCmd = &cobra.Command{
 			}
 
 			evaluations = append(evaluations, eval.CompanyEvaluation{
-				ID:             comp.ID,
-				Name:           comp.Name,
-				CompanyScore:   cScore.Total,
-				ContactScore:   ctScore.Total,
-				ContactsCount:  len(contacts),
-				ContactDetails: contactDetails,
-				Penalties:      penalties,
-				Status:         comp.Status,
+				ID:               comp.ID,
+				Name:             comp.Name,
+				CompanyScore:     cScore.Total,
+				CompanyBreakdown: cScore.Breakdown,
+				ContactScore:     ctScore.Total,
+				ContactsCount:    len(contacts),
+				ContactDetails:   contactDetails,
+				Penalties:        penalties,
+				Status:           comp.Status,
 			})
 		}
 
@@ -213,10 +214,39 @@ func printScorecard(report eval.Report, fm filterMetrics) {
 	fmt.Printf("  NEW (scored >0, eligible):%d\n", fm.ScoredPositive)
 	fmt.Printf("  Already enriched:         %d\n\n", fm.TotalCompanies-fm.NewUnscored-fm.ScoredZero-fm.ScoredPositive)
 
-	fmt.Println("Company Benchmark (website + linkedin):")
-	fmt.Printf("  Average: %.1f/100  |  Pass Rate: %.0f%%\n\n",
+	fmt.Println("Company Benchmark (website + linkedin + careers):")
+	fmt.Printf("  Average: %.1f/100  |  Pass Rate: %.0f%%\n",
 		m.CompanyBenchmark.AverageScore,
 		m.CompanyBenchmark.PassRate*100)
+
+	// Company breakdown stats
+	var websiteFound, websiteResolves, linkedinFound, careersFound, careersResolves int
+	for _, e := range report.Companies {
+		if e.CompanyBreakdown.WebsiteFound {
+			websiteFound++
+		}
+		if e.CompanyBreakdown.WebsiteResolves {
+			websiteResolves++
+		}
+		if e.CompanyBreakdown.LinkedinFound {
+			linkedinFound++
+		}
+		if e.CompanyBreakdown.CareersPageFound {
+			careersFound++
+		}
+		if e.CompanyBreakdown.CareersResolves {
+			careersResolves++
+		}
+	}
+	n := len(report.Companies)
+	fmt.Printf("  Website found: %d/%d (%.0f%%)  |  Resolves: %d/%d (%.0f%%)\n",
+		websiteFound, n, pct(websiteFound, n),
+		websiteResolves, n, pct(websiteResolves, n))
+	fmt.Printf("  LinkedIn found: %d/%d (%.0f%%)\n",
+		linkedinFound, n, pct(linkedinFound, n))
+	fmt.Printf("  Careers page found: %d/%d (%.0f%%)  |  Resolves: %d/%d (%.0f%%)\n\n",
+		careersFound, n, pct(careersFound, n),
+		careersResolves, n, pct(careersResolves, n))
 
 	fmt.Println("Contact Benchmark (PRIMARY):")
 	fmt.Printf("  Average: %.1f/100  |  Valid Rate: %.0f%%\n\n",
@@ -287,4 +317,11 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n-3] + "..."
+}
+
+func pct(num, total int) float64 {
+	if total == 0 {
+		return 0
+	}
+	return float64(num) / float64(total) * 100
 }

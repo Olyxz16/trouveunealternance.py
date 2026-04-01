@@ -42,7 +42,7 @@ func (db *DB) GetCompany(id uint) (*Company, error) {
 
 func (db *DB) GetCompaniesForEnrichment() ([]Company, error) {
 	var companies []Company
-	err := db.Where("status = 'NEW' AND (primary_contact_id = 0 OR company_type = 'UNKNOWN')").Find(&companies).Error
+	err := db.Where("status = 'NEW' AND (primary_contact_id = 0 OR company_type = 'UNKNOWN') AND company_type != 'NON_TECH'").Find(&companies).Error
 	return companies, err
 }
 

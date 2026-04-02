@@ -11,6 +11,7 @@ import (
 	"jobhunter/internal/tui"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -24,12 +25,14 @@ var (
 	batchSize int
 	companyID int
 	noTUI     bool
+	parallel  int
 )
 
 func init() {
 	enrichCmd.Flags().IntVarP(&batchSize, "batch", "b", 10, "Number of companies to enrich")
 	enrichCmd.Flags().IntVarP(&companyID, "id", "i", 0, "Specific company ID to enrich")
 	enrichCmd.Flags().BoolVar(&noTUI, "no-tui", false, "Disable TUI and log to stdout")
+	enrichCmd.Flags().IntVarP(&parallel, "parallel", "p", 1, "Number of companies to enrich in parallel")
 	rootCmd.AddCommand(enrichCmd)
 }
 
@@ -203,32 +206,59 @@ var enrichCmd = &cobra.Command{
 			if !noTUI {
 				p.Send(tui.ReadyMsg{})
 			}
-			reporter.Log(pipeline.LogMsg{Level: "INFO", Text: fmt.Sprintf("Enriching %d companies...", len(targetCompanies))})
+			reporter.Log(pipeline.LogMsg{Level: "INFO", Text: fmt.Sprintf("Enriching %d companies (parallel=%d)...", len(targetCompanies), parallel)})
 
-			// Start Processing
+			type result struct {
+				comp db.Company
+				err  error
+			}
+
+			companiesCh := make(chan db.Company, len(targetCompanies))
+			resultsCh := make(chan result, len(targetCompanies))
+
 			for _, c := range targetCompanies {
-				err := enr.EnrichCompany(ctx, c.ID, runID)
+				companiesCh <- c
+			}
+			close(companiesCh)
 
-				if err != nil {
+			var wg sync.WaitGroup
+			for w := 0; w < parallel; w++ {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					worker := enricher.NewEnricher(database, cfg, cascade, classifier, geminiAPI, runLogger, loadUserLinkedInURL())
+					worker.SetReporter(reporter)
+					for c := range companiesCh {
+						err := worker.EnrichCompany(ctx, c.ID, runID)
+						resultsCh <- result{comp: c, err: err}
+					}
+				}()
+			}
+
+			go func() {
+				wg.Wait()
+				close(resultsCh)
+			}()
+
+			for r := range resultsCh {
+				if r.err != nil {
 					reporter.Update(pipeline.ProgressUpdate{
-						ID:      int(c.ID),
-						Name:    c.Name,
+						ID:      int(r.comp.ID),
+						Name:    r.comp.Name,
 						Step:    "Failed",
 						Status:  pipeline.StatusError,
-						Message: err.Error(),
+						Message: r.err.Error(),
 					})
-					reporter.Log(pipeline.LogMsg{Level: "ERROR", Text: fmt.Sprintf("Failed to enrich %s: %v", c.Name, err)})
+					reporter.Log(pipeline.LogMsg{Level: "ERROR", Text: fmt.Sprintf("Failed to enrich %s: %v", r.comp.Name, r.err)})
 				} else {
 					reporter.Update(pipeline.ProgressUpdate{
-						ID:     int(c.ID),
-						Name:   c.Name,
+						ID:     int(r.comp.ID),
+						Name:   r.comp.Name,
 						Step:   "Done",
 						Status: pipeline.StatusDone,
 					})
-					reporter.Log(pipeline.LogMsg{Level: "INFO", Text: fmt.Sprintf("Successfully enriched %s", c.Name)})
+					reporter.Log(pipeline.LogMsg{Level: "INFO", Text: fmt.Sprintf("Successfully enriched %s", r.comp.Name)})
 				}
-
-				time.Sleep(1 * time.Second)
 			}
 			if !noTUI {
 				p.Send(tui.PipelineDoneMsg{})

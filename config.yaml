@@ -10,23 +10,23 @@ llm:
   # Each task can use different models for cost/quality optimization
   models:
     discovery:
-      primary: "google/gemini-2.0-flash-exp:free"
-      fallback: "meta-llama/llama-3.2-3b-instruct:free"
+      primary: "meta-llama/llama-3.2-3b-instruct:free"
+      fallback: "google/gemma-2-9b-it:free"
       provider: "openrouter"  # or "gemini_api"
     
     extraction:
-      primary: "google/gemini-2.0-flash-exp:free"
-      fallback: "meta-llama/llama-3.2-3b-instruct:free"
+      primary: "meta-llama/llama-3.2-3b-instruct:free"
+      fallback: "google/gemma-2-9b-it:free"
       provider: "openrouter"
     
     ranking:
-      primary: "google/gemini-2.0-flash-exp:free"
+      primary: "meta-llama/llama-3.2-3b-instruct:free"
       fallback: "mistralai/mistral-7b-instruct-v0.3:free"
       provider: "openrouter"
     
     enrichment:
-      primary: "google/gemini-2.0-flash-exp:free"
-      fallback: "meta-llama/llama-3.2-3b-instruct:free"
+      primary: "meta-llama/llama-3.2-3b-instruct:free"
+      fallback: "google/gemma-2-9b-it:free"
       provider: "openrouter"
   
   # Emergency fallback chain (tried if both primary+fallback fail)

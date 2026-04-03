@@ -91,38 +91,70 @@ func (c *Client) Complete(ctx context.Context, req CompletionRequest, task, runI
 	maxRetries := 3
 	backoff := 2 * time.Second
 
+	// Use rateLimiter if available, otherwise fall back to legacy limiter
+	waitFunc := func(ctx context.Context) error {
+		if c.rateLimiter != nil {
+			return c.rateLimiter.Wait(ctx)
+		}
+		return c.limiter.Wait(ctx)
+	}
+
+	recordRequest := func(provider string) {
+		if c.rateLimiter != nil {
+			c.rateLimiter.RecordRequest(provider)
+		}
+	}
+
+	recordSuccess := func(provider string, tokens int) {
+		if c.rateLimiter != nil {
+			c.rateLimiter.RecordSuccess(provider, tokens)
+		}
+	}
+
+	recordFailure := func(provider string) {
+		if c.rateLimiter != nil {
+			c.rateLimiter.RecordFailure(provider)
+		}
+	}
+
+	recordRateLimitHit := func(provider string) {
+		if c.rateLimiter != nil {
+			c.rateLimiter.RecordRateLimitHit(provider)
+		}
+	}
+
 	// 1. Try Primary
 	if !c.isBroken(c.provider.Name()) {
 		for i := 0; i <= maxRetries; i++ {
 			// Wait for rate limit and record request
-			if err := c.rateLimiter.Wait(ctx); err != nil {
+			if err := waitFunc(ctx); err != nil {
 				return CompletionResponse{}, err
 			}
-			c.rateLimiter.RecordRequest(c.provider.ProviderName())
+			recordRequest(c.provider.ProviderName())
 
 			attemptCtx, cancel := context.WithTimeout(ctx, 300*time.Second)
 			resp, err := c.provider.Complete(attemptCtx, req)
 			cancel()
 
 			if err == nil {
-				c.rateLimiter.RecordSuccess(c.provider.ProviderName(), resp.PromptTokens+resp.CompletionTokens)
+				recordSuccess(c.provider.ProviderName(), resp.PromptTokens+resp.CompletionTokens)
 				c.logUsage(resp, task, runID)
 				return resp, nil
 			}
 			lastErr = err
-			c.rateLimiter.RecordFailure(c.provider.ProviderName())
+			recordFailure(c.provider.ProviderName())
 
 			shouldRetry := false
 			isFatal := false
 
 			if _, ok := err.(*errors.RateLimitError); ok {
-				c.rateLimiter.RecordRateLimitHit(c.provider.ProviderName())
+				recordRateLimitHit(c.provider.ProviderName())
 				shouldRetry = true
 				backoff = 10 * time.Second // Aggressive cooldown for rate limits
 			} else if modelErr, ok := err.(*errors.ModelError); ok {
 				if modelErr.StatusCode >= 500 || modelErr.StatusCode == 429 {
 					if modelErr.StatusCode == 429 {
-						c.rateLimiter.RecordRateLimitHit(c.provider.ProviderName())
+						recordRateLimitHit(c.provider.ProviderName())
 					}
 					shouldRetry = true
 				}
@@ -157,25 +189,25 @@ func (c *Client) Complete(ctx context.Context, req CompletionRequest, task, runI
 		c.logger.Info("Attempting configured fallback", zap.String("fallback", c.fallback.Name()))
 
 		// Wait for rate limit and record request
-		if err := c.rateLimiter.Wait(ctx); err != nil {
+		if err := waitFunc(ctx); err != nil {
 			return CompletionResponse{}, err
 		}
-		c.rateLimiter.RecordRequest(c.fallback.ProviderName())
+		recordRequest(c.fallback.ProviderName())
 
 		attemptCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 		resp, err := c.fallback.Complete(attemptCtx, req)
 		cancel()
 
 		if err == nil {
-			c.rateLimiter.RecordSuccess(c.fallback.ProviderName(), resp.PromptTokens+resp.CompletionTokens)
+			recordSuccess(c.fallback.ProviderName(), resp.PromptTokens+resp.CompletionTokens)
 			c.logUsage(resp, task, runID)
 			return resp, nil
 		}
 
-		c.rateLimiter.RecordFailure(c.fallback.ProviderName())
+		recordFailure(c.fallback.ProviderName())
 		if modelErr, ok := err.(*errors.ModelError); ok {
 			if modelErr.StatusCode == 429 {
-				c.rateLimiter.RecordRateLimitHit(c.fallback.ProviderName())
+				recordRateLimitHit(c.fallback.ProviderName())
 			}
 			if modelErr.StatusCode == 402 || modelErr.StatusCode == 400 || modelErr.StatusCode == 404 {
 				c.markBroken(c.fallback.Name())
@@ -199,10 +231,10 @@ func (c *Client) Complete(ctx context.Context, req CompletionRequest, task, runI
 			c.logger.Debug("Emergency fallback trial", zap.String("model", model))
 
 			// Wait for rate limit and record request
-			if err := c.rateLimiter.Wait(ctx); err != nil {
+			if err := waitFunc(ctx); err != nil {
 				return CompletionResponse{}, err
 			}
-			c.rateLimiter.RecordRequest("openrouter_emergency")
+			recordRequest("openrouter_emergency")
 
 			orProvider.Model = model
 			attemptCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
@@ -211,15 +243,15 @@ func (c *Client) Complete(ctx context.Context, req CompletionRequest, task, runI
 
 			if err == nil {
 				c.logger.Info("Emergency model succeeded!", zap.String("model", model))
-				c.rateLimiter.RecordSuccess("openrouter_emergency", resp.PromptTokens+resp.CompletionTokens)
+				recordSuccess("openrouter_emergency", resp.PromptTokens+resp.CompletionTokens)
 				c.logUsage(resp, task, runID)
 				return resp, nil
 			}
 
-			c.rateLimiter.RecordFailure("openrouter_emergency")
+			recordFailure("openrouter_emergency")
 			if modelErr, ok := err.(*errors.ModelError); ok {
 				if modelErr.StatusCode == 429 {
-					c.rateLimiter.RecordRateLimitHit("openrouter_emergency")
+					recordRateLimitHit("openrouter_emergency")
 				}
 				if modelErr.StatusCode == 402 || modelErr.StatusCode == 400 {
 					c.markBroken(model)

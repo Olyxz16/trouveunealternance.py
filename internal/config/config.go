@@ -20,8 +20,8 @@ type Config struct {
 	DBPath              string `env:"DB_PATH" envDefault:"data/jobs.db"`
 	SireneParquetPath   string `env:"SIRENE_PARQUET_PATH" envDefault:"data/sirene.parquet"`
 	SireneULParquetPath string `env:"SIRENE_UL_PARQUET_PATH" envDefault:"data/sirene_ul.parquet"`
-	OpenRouterAPIKey    string `env:"OPENROUTER_API_KEY,required"`
-	GeminiAPIKey        string `env:"GEMINI_API_KEY,required"`
+	OpenRouterAPIKey    string `env:"OPENROUTER_API_KEY"` // At least one of OpenRouter or Gemini required
+	GeminiAPIKey        string `env:"GEMINI_API_KEY"`     // At least one of OpenRouter or Gemini required
 	ChromeExecutable    string `env:"CHROME_EXECUTABLE" envDefault:""`
 	DuckDuckGoBaseURL   string `env:"DUCKDUCKGO_BASE_URL" envDefault:"https://html.duckduckgo.com/html/"`
 
@@ -237,8 +237,9 @@ func Load() *Config {
 	}
 
 	// Populate legacy LLM fields for backward compatibility
-	cfg.LLMPrimary = cfg.LLM.Models.Extraction.Primary
-	cfg.LLMFallback = cfg.LLM.Models.Extraction.Fallback
+	// LLMPrimary/LLMFallback should be provider names ("openrouter", "gemini_api"), not model names
+	cfg.LLMPrimary = cfg.LLM.Models.Extraction.Provider
+	cfg.LLMFallback = "" // Legacy code expects a provider name, but we only have one provider per task
 	cfg.OpenRouterRPM = cfg.LLM.RateLimits.RequestsPerMinute
 	cfg.OpenRouterModel = cfg.LLM.Models.Extraction.Primary
 	cfg.GeminiAPIModel = cfg.GetGeminiAPIModel()

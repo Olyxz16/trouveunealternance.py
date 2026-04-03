@@ -392,25 +392,58 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID uint, runID string)
 
 	// We only enrich 'real' candidates
 	enrichedCount := 0
-	for i, candidate := range realCandidates {
-		if i >= maxProfiles {
-			enriched = append(enriched, candidate)
-			continue
-		}
-		profile, _ := e.classifier.EnrichIndividualProfile(ctx, e.fetcher, candidate, runID)
-		if profile.Email != "" && candidate.Email == "" {
-			candidate.Email = profile.Email
-		}
-		enriched = append(enriched, candidate)
-		enrichedCount++
-		e.reporter.Update(pipeline.ProgressUpdate{
-			ID:      int(comp.ID),
-			Name:    comp.Name,
-			Step:    "Enriching Contacts",
-			Status:  pipeline.StatusRunning,
-			Message: fmt.Sprintf("%d/%d", enrichedCount, min(3, len(realCandidates))),
-		})
+	candidatesToEnrich := realCandidates
+	if maxProfiles < len(candidatesToEnrich) {
+		candidatesToEnrich = candidatesToEnrich[:maxProfiles]
 	}
+
+	if e.cfg.Enrichment.Methods.BatchEnrichment && len(candidatesToEnrich) > 1 {
+		// Batch enrichment: single LLM call for all profiles
+		batchProfiles, err := e.classifier.EnrichProfilesBatch(ctx, e.fetcher, candidatesToEnrich, runID)
+		if err == nil {
+			for i, profile := range batchProfiles {
+				candidate := candidatesToEnrich[i]
+				if profile.Email != "" && candidate.Email == "" {
+					candidate.Email = profile.Email
+				}
+				enriched = append(enriched, candidate)
+				enrichedCount++
+			}
+		} else {
+			// Fallback to individual enrichment on batch failure
+			for _, candidate := range candidatesToEnrich {
+				profile, _ := e.classifier.EnrichIndividualProfile(ctx, e.fetcher, candidate, runID)
+				if profile.Email != "" && candidate.Email == "" {
+					candidate.Email = profile.Email
+				}
+				enriched = append(enriched, candidate)
+				enrichedCount++
+			}
+		}
+	} else {
+		// Individual enrichment (original method)
+		for _, candidate := range candidatesToEnrich {
+			profile, _ := e.classifier.EnrichIndividualProfile(ctx, e.fetcher, candidate, runID)
+			if profile.Email != "" && candidate.Email == "" {
+				candidate.Email = profile.Email
+			}
+			enriched = append(enriched, candidate)
+			enrichedCount++
+		}
+	}
+
+	// Add remaining candidates without enrichment
+	for i := len(candidatesToEnrich); i < len(realCandidates); i++ {
+		enriched = append(enriched, realCandidates[i])
+	}
+
+	e.reporter.Update(pipeline.ProgressUpdate{
+		ID:      int(comp.ID),
+		Name:    comp.Name,
+		Step:    "Enriching Contacts",
+		Status:  pipeline.StatusRunning,
+		Message: fmt.Sprintf("%d/%d", enrichedCount, min(3, len(realCandidates))),
+	})
 
 	// Do NOT save hallucinated contacts — they pollute the database
 
@@ -430,7 +463,11 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID uint, runID string)
 				toRank = append(toRank, c)
 			}
 		}
-		best, _ = e.classifier.RankContacts(ctx, toRank, info.CompanyType, runID)
+		if e.cfg.Enrichment.Methods.BatchRanking {
+			best, _ = e.classifier.RankContactsBatch(ctx, toRank, info.CompanyType, runID)
+		} else {
+			best, _ = e.classifier.RankContacts(ctx, toRank, info.CompanyType, runID)
+		}
 	}
 
 	if best == nil {

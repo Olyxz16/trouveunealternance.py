@@ -69,16 +69,17 @@ func (db *DB) Migrate() error {
 		&RunLog{},
 		&ScrapeCache{},
 		&TokenUsage{},
+		&LLMResponseCache{},
 	)
 }
 
 // Stats holds database statistics.
 type Stats struct {
-	TotalJobs          int64
-	NewJobsToday       int64
-	TotalProspects     int64
-	NewProspectsToday  int64
-	ProspectsByStatus  map[string]int64
+	TotalJobs         int64
+	NewJobsToday      int64
+	TotalProspects    int64
+	NewProspectsToday int64
+	ProspectsByStatus map[string]int64
 }
 
 func (db *DB) GetStats() (Stats, error) {

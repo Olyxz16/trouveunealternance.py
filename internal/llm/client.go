@@ -23,22 +23,23 @@ type Client struct {
 	logger          *zap.Logger
 	brokenProviders map[string]bool
 	mu              sync.RWMutex
+
+	// Cache
+	cacheEnabled bool
+	cacheTTL     map[string]int // task -> TTL hours
 }
 
 func NewClient(provider Provider, fallback Provider, rpm int, database *db.DB, logger *zap.Logger) *Client {
-	return NewClientWithSharedLimiter(provider, fallback, rpm, database, logger, nil)
+	return NewClientWithCache(provider, fallback, rpm, database, logger, false, nil)
 }
 
-func NewClientWithSharedLimiter(provider Provider, fallback Provider, rpm int, database *db.DB, logger *zap.Logger, sharedLimiter *rate.Limiter) *Client {
+func NewClientWithCache(provider Provider, fallback Provider, rpm int, database *db.DB, logger *zap.Logger, cacheEnabled bool, cacheTTL map[string]int) *Client {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
 
 	// Create or use shared rate limiter (for backward compatibility)
-	limiter := sharedLimiter
-	if limiter == nil {
-		limiter = rate.NewLimiter(rate.Every(time.Minute/time.Duration(rpm)), 1)
-	}
+	limiter := rate.NewLimiter(rate.Every(time.Minute/time.Duration(rpm)), 1)
 
 	// Create unified rate limiter with tracking (daily limit enforced)
 	rateLimiter := NewUnifiedRateLimiter(rpm, 500, 1, logger)
@@ -51,6 +52,8 @@ func NewClientWithSharedLimiter(provider Provider, fallback Provider, rpm int, d
 		db:              database,
 		logger:          logger,
 		brokenProviders: make(map[string]bool),
+		cacheEnabled:    cacheEnabled,
+		cacheTTL:        cacheTTL,
 	}
 }
 
@@ -87,6 +90,19 @@ var freeFallbackModels = []string{
 }
 
 func (c *Client) Complete(ctx context.Context, req CompletionRequest, task, runID string) (CompletionResponse, error) {
+	// Check cache before making request
+	if c.cacheEnabled && c.db != nil {
+		promptHash := db.HashPrompt(req.System, req.User)
+		cached, err := c.db.GetCachedLLMResponse(promptHash, task)
+		if err == nil && cached != "" {
+			c.logger.Debug("LLM cache hit", zap.String("task", task))
+			var resp CompletionResponse
+			if err := json.Unmarshal([]byte(cached), &resp); err == nil {
+				return resp, nil
+			}
+		}
+	}
+
 	var lastErr error
 	maxRetries := 3
 	backoff := 2 * time.Second
@@ -139,6 +155,7 @@ func (c *Client) Complete(ctx context.Context, req CompletionRequest, task, runI
 			if err == nil {
 				recordSuccess(c.provider.ProviderName(), resp.PromptTokens+resp.CompletionTokens)
 				c.logUsage(resp, task, runID)
+				c.cacheResponse(req, task, resp)
 				return resp, nil
 			}
 			lastErr = err
@@ -201,6 +218,7 @@ func (c *Client) Complete(ctx context.Context, req CompletionRequest, task, runI
 		if err == nil {
 			recordSuccess(c.fallback.ProviderName(), resp.PromptTokens+resp.CompletionTokens)
 			c.logUsage(resp, task, runID)
+			c.cacheResponse(req, task, resp)
 			return resp, nil
 		}
 
@@ -245,6 +263,7 @@ func (c *Client) Complete(ctx context.Context, req CompletionRequest, task, runI
 				c.logger.Info("Emergency model succeeded!", zap.String("model", model))
 				recordSuccess("openrouter_emergency", resp.PromptTokens+resp.CompletionTokens)
 				c.logUsage(resp, task, runID)
+				c.cacheResponse(req, task, resp)
 				return resp, nil
 			}
 
@@ -366,5 +385,29 @@ func (c *Client) logUsage(resp CompletionResponse, task, runID string) {
 	err := c.db.InsertTokenUsage(usage)
 	if err != nil {
 		c.logger.Error("Failed to log token usage", zap.Error(err))
+	}
+}
+
+func (c *Client) cacheResponse(req CompletionRequest, task string, resp CompletionResponse) {
+	if !c.cacheEnabled || c.db == nil {
+		return
+	}
+
+	ttlHours := 24 // Default TTL
+	if c.cacheTTL != nil {
+		if t, ok := c.cacheTTL[task]; ok {
+			ttlHours = t
+		}
+	}
+
+	promptHash := db.HashPrompt(req.System, req.User)
+	responseJSON, err := json.Marshal(resp)
+	if err != nil {
+		c.logger.Error("Failed to marshal response for cache", zap.Error(err))
+		return
+	}
+
+	if err := c.db.SetCachedLLMResponse(promptHash, task, c.provider.ProviderName(), c.provider.Name(), string(responseJSON), ttlHours); err != nil {
+		c.logger.Error("Failed to cache LLM response", zap.Error(err))
 	}
 }

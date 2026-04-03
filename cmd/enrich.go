@@ -173,7 +173,9 @@ var enrichCmd = &cobra.Command{
 			reporter.Log(pipeline.LogMsg{Level: "INFO", Text: "Connecting to LLM providers..."})
 			primary, fallback := llm.InitProviders(cfg.LLMPrimary, cfg.LLMFallback, cfg, runLogger)
 
-			llmClient := llm.NewClient(primary, fallback, cfg.OpenRouterRPM, database, runLogger)
+			llmCacheEnabled := cfg.Cache.LLMResponses.Enabled
+			llmCacheTTL := cfg.Cache.LLMResponses.TTLHours
+			llmClient := llm.NewClientWithCache(primary, fallback, cfg.OpenRouterRPM, database, runLogger, llmCacheEnabled, llmCacheTTL)
 			classifier := enricher.NewClassifier(llmClient, database)
 
 			var geminiAPI *llm.GeminiAPIProvider

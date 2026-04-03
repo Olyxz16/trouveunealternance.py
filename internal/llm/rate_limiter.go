@@ -34,13 +34,13 @@ type ProviderStats struct {
 }
 
 // NewUnifiedRateLimiter creates a new centralized rate limiter
-func NewUnifiedRateLimiter(requestsPerMinute, requestsPerDay int, logger *zap.Logger) *UnifiedRateLimiter {
+func NewUnifiedRateLimiter(requestsPerMinute, requestsPerDay, burstSize int, logger *zap.Logger) *UnifiedRateLimiter {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
 
-	// Create token bucket limiter: refills at rate, allows burst of 1
-	limiter := rate.NewLimiter(rate.Every(time.Minute/time.Duration(requestsPerMinute)), 1)
+	// Create token bucket limiter: refills at rate, allows configurable burst
+	limiter := rate.NewLimiter(rate.Every(time.Minute/time.Duration(requestsPerMinute)), burstSize)
 
 	return &UnifiedRateLimiter{
 		limiter:    limiter,

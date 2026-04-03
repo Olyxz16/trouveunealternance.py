@@ -40,8 +40,8 @@ func NewClientWithSharedLimiter(provider Provider, fallback Provider, rpm int, d
 		limiter = rate.NewLimiter(rate.Every(time.Minute/time.Duration(rpm)), 1)
 	}
 
-	// Create unified rate limiter with tracking (no daily limit for now, set to 0)
-	rateLimiter := NewUnifiedRateLimiter(rpm, 0, logger)
+	// Create unified rate limiter with tracking (daily limit enforced)
+	rateLimiter := NewUnifiedRateLimiter(rpm, 500, 1, logger)
 
 	return &Client{
 		provider:        provider,

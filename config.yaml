@@ -36,13 +36,13 @@ llm:
   
   # Rate limiting (unified global limiter)
   rate_limits:
-    requests_per_minute: 50
-    requests_per_day: 50000
-    burst_size: 3
+    requests_per_minute: 30
+    requests_per_day: 500
+    burst_size: 1
     
     # Per-provider limits (for monitoring/alerting only)
     provider_limits:
-      openrouter: 50
+      openrouter: 30
       gemini_api: 12
     
     # Backoff strategy
